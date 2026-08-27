@@ -1,0 +1,6 @@
+{
+  "live_repo": "./live-repo",
+  "backup_dir": "./backups",
+  "git_exec_path": "",
+  "git_branch": "master"
+}

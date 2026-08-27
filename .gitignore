@@ -1,0 +1,26 @@
+# 本机配置（含各人自己的路径），不进仓库
+config.json
+
+# 自己的课表数据：这是学校的真实排课，不该进公开仓库
+schedule.yaml
+schedule.*.yaml
+!examples/*.yaml
+
+# 生成产物
+dist/
+dist_live/
+live-repo/
+backups/
+versions.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+*.swp

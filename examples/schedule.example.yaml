@@ -1,0 +1,112 @@
+# ClassIsland 集控配置示例
+#
+# 这是唯一需要人工编辑（或用 Web 界面编辑）的文件。
+# 跑 `python3 src/split.py` 会把它编译成集控服务器需要的整套静态文件。
+#
+# 复制一份改成自己的：
+#     cp examples/schedule.example.yaml schedule.yaml
+
+# 学校名称，会显示在客户端的集控信息里
+school: 示例中学
+
+publish:
+  # 静态文件的公开访问根地址。
+  # 用 Gitee/GitHub 仓库的 raw 地址即可，注意分支名要对。
+  #   Gitee : https://gitee.com/<用户>/<仓库>/raw/master
+  #   GitHub: https://raw.githubusercontent.com/<用户>/<仓库>/main
+  base_url: https://gitee.com/CHANGE_ME/CHANGE_ME/raw/master
+
+# 集控策略：控制学生机上哪些功能被锁定
+policy:
+  DisableProfileClassPlanEditing: false   # 禁止本机改课表
+  DisableProfileTimeLayoutEditing: false  # 禁止本机改作息
+  DisableProfileSubjectsEditing: false    # 禁止本机改科目
+  DisableProfileEditing: false            # 禁止本机改档案
+  DisableSettingsEditing: false           # 禁止本机改设置
+  DisableSplashCustomize: false           # 禁止自定义启动画面
+  DisableDebugMenu: false                 # 禁用调试菜单
+  AllowExitManagement: true               # 允许退出集控（建议保持 true，便于排障）
+  DisableEasterEggs: false                # 禁用彩蛋
+
+# ── 作息时间表 ────────────────────────────────────────────────
+# type 说明：
+#   class    上课（需要 start + end）
+#   break    课间（需要 start + end，可加 name 显示"大课间"等）
+#   divider  分割线（零长度标记，只需 start，用来在界面上分隔上下午）
+#   action   行动标记（零长度，供自动化触发用）
+#
+# 注意：class 的数量必须与下面每天填的课程数一致。
+timelayouts:
+  标准作息:
+    items:
+      - { start: "07:30", end: "08:10", type: class }
+      - { start: "08:10", end: "08:20", type: break }
+      - { start: "08:20", end: "09:00", type: class }
+      - { start: "09:00", end: "09:30", type: break, name: 大课间 }
+      - { start: "09:30", end: "10:10", type: class }
+      - { start: "10:10", end: "10:20", type: break }
+      - { start: "10:20", end: "11:00", type: class }
+      - { start: "11:00", type: divider }
+      - { start: "13:30", end: "14:10", type: class }
+      - { start: "14:10", end: "14:20", type: break }
+      - { start: "14:20", end: "15:00", type: class }
+
+  # 周五提前放学，单独一张作息
+  周五作息:
+    items:
+      - { start: "07:30", end: "08:10", type: class }
+      - { start: "08:10", end: "08:20", type: break }
+      - { start: "08:20", end: "09:00", type: class }
+      - { start: "09:00", end: "09:30", type: break, name: 大课间 }
+      - { start: "09:30", end: "10:10", type: class }
+      - { start: "10:10", end: "10:20", type: break }
+      - { start: "10:20", end: "11:00", type: class }
+
+# ── 科目 ──────────────────────────────────────────────────────
+# ClassIsland 自带 21 个官方科目，直接写名字就能用，无需在此声明：
+#   语文 数学 英语 物理 化学 生物 政治 历史 地理 音乐 美术 体育
+#   信息技术 通用技术 心理 班会 自习 早读 周测 社团 选修课
+#
+# 只有要加官方没有的科目时才需要这一段：
+# subjects:
+#   校本课程: { initial: 校, teacher: 张老师 }
+#   劳动实践: { initial: 劳, outdoor: true }
+
+# ── 班级 ──────────────────────────────────────────────────────
+# id 就是客户端「集控 → 班级标识」里填的值，也是仓库里的目录名。
+#     ⚠️ id 一旦投入使用就不要改，改了对应大屏立刻拉不到课表。
+#
+# 星期键：mon tue wed thu fri sat sun
+#   加 @n 表示多周轮换的第 n 周，例如 mon@1 / mon@2（配合 weeks）
+#   某天要用别的作息：{ timelayout: 周五作息, classes: [...] }
+#   无课的位置填 ~
+classes:
+  - id: "101"
+    name: 高一1班
+    timelayout: 标准作息
+    weeks: 2                     # 双周轮换（不轮换的班级可省略）
+    schedule:
+      mon@1: [语文, 数学, 英语, 物理, 化学, 生物]
+      mon@2: [语文, 数学, 英语, 物理, 化学, 体育]
+      tue:   [数学, 语文, 英语, 历史, 地理, 政治]
+      wed:   [英语, 数学, 语文, 物理, 音乐, 美术]
+      thu:   [语文, 英语, 数学, 化学, 生物, 体育]
+      fri:   { timelayout: 周五作息, classes: [数学, 语文, 英语, 班会] }
+
+  - id: "102"
+    name: 高一2班
+    timelayout: 标准作息
+    schedule:
+      mon: [数学, 语文, 英语, 化学, 物理, 体育]
+      tue: [语文, 数学, 英语, 地理, 历史, 自习]
+      wed: [英语, 语文, 数学, 生物, 美术, 音乐]
+      thu: [数学, 英语, 语文, 物理, 化学, ~]
+      fri: { timelayout: 周五作息, classes: [语文, 数学, 英语, 班会] }
+
+  # ── 预留班级 ──────────────────────────────────────────────
+  # reserved: true = 只占住 id，尚未排课。
+  #   · 不会生成 <id>/classplans.json（空课表会把大屏刷成空白）
+  #   · 排课时：删掉 reserved，补上 timelayout + schedule 即可
+  #   · 删班级：删掉整段后跑 tools/prune_ids.py 清理线上残留目录
+  - { id: "103", name: 高一3班, reserved: true }
+  - { id: "104", name: 高一4班, reserved: true }
