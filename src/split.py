@@ -120,6 +120,10 @@ def main() -> int:
         return 1
 
     school = doc.get("school", "")
+    # OrganizationName 独立于 school：客户端集控信息里显示的组织名。
+    # 官方 manifest 有 OrganizationName 字段，早期版本把它硬绑成 school，
+    # 于是「档案名」和「组织名」无法分开设置。留空则回落到 school。
+    org = str(doc.get("organization") or school or "")
     out = Path(a.out)
     vers = Versions(ROOT / "versions.json")
 
@@ -208,7 +212,7 @@ def main() -> int:
     # ── manifest.json（单份，{id} 由客户端替换） ────────────────
     manifest = {
         "ServerKind": 0,                       # 0 = Serverless（纯静态文件）
-        "OrganizationName": school,
+        "OrganizationName": org,
         "CoreVersion": S.CORE_VERSION,         # 2.0.0.0（IL 实测，≠ 程序集 2.1.0.1）
         "ClassPlanSource": S.re_version(f"{base}/{{id}}/classplans.json", v_cp),
         "TimeLayoutSource": S.re_version(f"{base}/timelayouts.json", v_tl),

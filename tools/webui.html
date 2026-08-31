@@ -19,18 +19,24 @@ header{position:sticky;top:0;z-index:20;background:var(--panel);
 h1{font-size:15px;margin:0;font-weight:600}
 .school{color:var(--dim);font-size:12px}
 .spacer{flex:1}
-button{background:var(--panel2);color:var(--fg);border:1px solid var(--line);
-       border-radius:6px;padding:6px 12px;cursor:pointer;font-size:13px}
-button:hover{border-color:var(--accent)}
+button,a.btn{background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+       border-radius:6px;padding:6px 12px;cursor:pointer;font-size:13px;
+       text-decoration:none;display:inline-block}
+button:hover,a.btn:hover{border-color:var(--accent)}
 button:disabled{opacity:.45;cursor:not-allowed}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
 button.danger{border-color:var(--bad);color:var(--bad)}
+button.sm{padding:3px 8px;font-size:12px}
 main{padding:16px;max-width:1500px;margin:0 auto}
+.nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;
+     border-bottom:1px solid var(--line);padding-bottom:12px}
+.nav .tab{padding:8px 16px;font-size:13px}
 .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
 .tab{padding:7px 14px;border-radius:6px;background:var(--panel);
      border:1px solid var(--line);cursor:pointer;font-size:13px}
 .tab.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
 .tab.res{opacity:.55;font-style:italic}
+.tab .dot{color:var(--warn);font-weight:700}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
       padding:14px;margin-bottom:14px}
 .card h2{font-size:13px;margin:0 0 10px;color:var(--dim);font-weight:600;
@@ -44,13 +50,18 @@ td select{width:100%;height:100%;min-height:32px;background:transparent;color:va
           text-align-last:center;appearance:none}
 td select:hover{background:var(--panel2)}
 td select:focus{outline:2px solid var(--accent);outline-offset:-2px}
-td.empty select{color:#4a5260}
 tr.divider td,tr.divider th{border-bottom:2px solid var(--accent)}
 .mark{background:#12161b;color:var(--warn);font-size:11px;padding:3px 10px;text-align:left}
 .row2{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 label.f{display:flex;gap:6px;align-items:center;color:var(--dim);font-size:12px}
-input[type=text],select.inp{background:var(--panel2);color:var(--fg);
-  border:1px solid var(--line);border-radius:5px;padding:5px 8px;font-size:13px}
+input[type=text],input[type=time],select.inp,textarea{background:var(--panel2);color:var(--fg);
+  border:1px solid var(--line);border-radius:5px;padding:5px 8px;font-size:13px;
+  font-family:inherit}
+input[readonly]{opacity:.6;cursor:not-allowed}
+table.edit td{padding:3px 5px}
+table.edit td input[type=text],table.edit td input[type=time],
+table.edit td select.inp{width:100%;background:#12161b}
+table.edit td.ctl{white-space:nowrap;width:1%}
 .sw{display:flex;justify-content:space-between;align-items:center;gap:10px;
     padding:8px 10px;background:var(--panel2);border:1px solid var(--line);
     border-radius:7px}
@@ -69,11 +80,18 @@ input:checked+.slider:before{transform:translateX(18px)}
      padding:12px;max-height:340px;overflow:auto;margin-top:10px}
 .toast{position:fixed;right:16px;bottom:16px;z-index:99;background:var(--panel2);
   border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;
-  padding:11px 15px;max-width:420px;box-shadow:0 8px 28px #0009;font-size:13px}
+  padding:11px 15px;max-width:420px;box-shadow:0 8px 28px #0009;font-size:13px;
+  white-space:pre-wrap}
 .toast.ok{border-left-color:var(--ok)} .toast.bad{border-left-color:var(--bad)}
 .toast.warn{border-left-color:var(--warn)}
 .hint{color:var(--dim);font-size:12px;margin-top:8px}
+.hint code{background:var(--panel2);padding:1px 4px;border-radius:3px}
+.warnbox{background:#2a1f0a;border:1px solid var(--warn);color:#f0d48a;
+  border-radius:7px;padding:9px 12px;font-size:12px;margin-bottom:10px}
 .dirty{color:var(--warn)}
+.pill{font-size:11px;color:var(--dim);background:var(--panel2);border:1px solid var(--line);
+  border-radius:20px;padding:2px 9px;margin:0 4px 4px 0;display:inline-block}
+.mono{font:11px ui-monospace,Menlo,Consolas,monospace;color:var(--dim)}
 </style>
 </head>
 <body>
@@ -89,29 +107,139 @@ input:checked+.slider:before{transform:translateX(18px)}
 </header>
 
 <main>
-  <div class="tabs" id="tabs"></div>
+  <div class="nav" id="nav"></div>
 
-  <div class="card" id="cCls">
-    <h2>班级设置</h2>
-    <div class="row2">
-      <label class="f">id <input type="text" id="fId" size="10" readonly title="id 对应线上目录名，改动会导致大屏拉不到课表，故只读"></label>
-      <label class="f">名称 <input type="text" id="fName" size="14"></label>
-      <label class="f">默认作息 <select class="inp" id="fTl"></select></label>
-      <label class="f">轮换周数 <input type="text" id="fWeeks" size="3"></label>
+  <!-- ══ 课表 ══════════════════════════════════════════ -->
+  <div class="pane" id="pClass">
+    <div class="tabs" id="tabs"></div>
+
+    <div class="card" id="cCls">
+      <h2>班级设置</h2>
+      <div class="row2">
+        <label class="f">id <input type="text" id="fId" size="10" readonly title="id 对应线上目录名，改动会导致大屏拉不到课表，故只读"></label>
+        <label class="f">名称 <input type="text" id="fName" size="14"></label>
+        <label class="f">默认作息 <select class="inp" id="fTl"></select></label>
+        <label class="f">轮换周数 <input type="text" id="fWeeks" size="3"></label>
+      </div>
+      <div class="hint">id 只读：它就是线上目录名，也是客户端 <code>{id}</code> 的替换值，改了大屏立刻拉不到课表。</div>
     </div>
-    <div class="hint">id 只读：它就是线上目录名，也是客户端 <code>{id}</code> 的替换值，改了大屏立刻拉不到课表。</div>
+
+    <div class="card">
+      <h2>课表</h2>
+      <div class="wk" id="wkTabs"></div>
+      <div style="overflow:auto"><table id="grid"></table></div>
+      <div class="hint">行 = 上课节次（左侧为该节真实起止时间）；蓝线 = 作息里的分割线；留空 = 无课。周五等使用不同作息的日子会单独按其作息渲染。</div>
+    </div>
   </div>
 
-  <div class="card">
-    <h2>课表</h2>
-    <div class="wk" id="wkTabs"></div>
-    <div style="overflow:auto"><table id="grid"></table></div>
-    <div class="hint">行 = 上课节次（左侧为该节真实起止时间）；蓝线 = 作息里的分割线；留空 = 无课。周五等使用不同作息的日子会单独按其作息渲染。</div>
+  <!-- ══ 作息 ══════════════════════════════════════════ -->
+  <div class="pane" id="pLayout" hidden>
+    <div class="card">
+      <h2>作息表</h2>
+      <div class="tabs" id="tlTabs"></div>
+      <div class="row2">
+        <button class="sm" id="tlAdd">+ 新建作息</button>
+        <button class="sm" id="tlRename">重命名</button>
+        <button class="sm danger" id="tlDel">删除此作息</button>
+        <span class="spacer"></span>
+        <span class="mono" id="tlGuid"></span>
+      </div>
+      <div id="tlWarn"></div>
+      <div style="overflow:auto"><table class="edit" id="tlTable"></table></div>
+      <div class="row2" style="margin-top:10px">
+        <button class="sm" id="tlAddClass">+ 上课</button>
+        <button class="sm" id="tlAddBreak">+ 课间</button>
+        <button class="sm" id="tlAddDiv">+ 分割线</button>
+        <button class="sm" id="tlAddAct">+ 行动</button>
+      </div>
+      <div class="hint">
+        <b>上课 / 课间</b> 需要起止时间；<b>分割线 / 行动</b> 是零长度标记，只有开始时间。<br>
+        上课节数决定课表网格有几行 —— 增删「上课」项会改变所有用此作息班级的课表长度。<br>
+        <code>guid</code> 是线上既有 GUID 的钉桩，只读：改它会让引用此作息的线上课表全部悬空（静默损坏）。
+      </div>
+    </div>
   </div>
 
-  <div class="card">
-    <h2>集控策略（policy）</h2>
-    <div class="grid" id="pol"></div>
+  <!-- ══ 科目 ══════════════════════════════════════════ -->
+  <div class="pane" id="pSubject" hidden>
+    <div class="card">
+      <h2>自定义科目</h2>
+      <div style="overflow:auto"><table class="edit" id="subTable"></table></div>
+      <div class="row2" style="margin-top:10px">
+        <button class="sm" id="subAdd">+ 新增科目</button>
+      </div>
+      <div class="hint">
+        只在这里登记<b>官方 21 科之外</b>的科目。<code>简称</code>留空则自动取名称首字；
+        <code>户外</code>会让客户端按室外课处理（如天气提醒）。<br>
+        科目名必须与课表里写的完全一致 —— 拼错会在构建时报错，而不是静默生成幽灵科目。
+      </div>
+    </div>
+    <div class="card">
+      <h2>官方科目（只读，共 <span id="offCount"></span> 科）</h2>
+      <div id="offList"></div>
+      <div class="hint">官方科目的 GUID / 简称 / 户外属性由 ClassIsland 上游定义，本工具直接复用，
+        <b>不抄进 yaml</b> —— 抄一份就等于把它冻结在今天的值上，以后上游改了还在下发旧值。</div>
+    </div>
+  </div>
+
+  <!-- ══ 默认设置 ══════════════════════════════════════ -->
+  <div class="pane" id="pSettings" hidden>
+    <div class="card">
+      <h2>客户端默认设置（DefaultSettingsSource）</h2>
+      <div class="warnbox">
+        这里配的是<b>下发给客户端的默认设置</b>。键名必须与 ClassIsland 自身的设置模型一致，
+        本工具<b>不校验键名</b>（做白名单只会拦住合法配置）。填错的键客户端会忽略。<br>
+        留空 = manifest 不带 <code>DefaultSettingsSource</code>，客户端保留本机设置。
+      </div>
+      <div style="overflow:auto"><table class="edit" id="setTable"></table></div>
+      <div class="row2" style="margin-top:10px">
+        <button class="sm" id="setAdd">+ 新增设置项</button>
+      </div>
+      <div class="hint">类型选 <code>JSON</code> 时值按 JSON 解析，可写数组或对象，例如
+        <code>[1, 2, 3]</code> 或 <code>{"A": true}</code>。</div>
+    </div>
+  </div>
+
+  <!-- ══ 策略 ══════════════════════════════════════════ -->
+  <div class="pane" id="pPolicy" hidden>
+    <div class="card">
+      <h2>集控策略（policy）</h2>
+      <div class="grid" id="pol"></div>
+      <div class="hint">策略下发后客户端本机对应功能会被锁住。
+        <code>DisableEasterEggs</code> 未见于官方文档，是实测得到的字段，可能随版本失效。</div>
+    </div>
+  </div>
+
+  <!-- ══ 基本信息 ══════════════════════════════════════ -->
+  <div class="pane" id="pSite" hidden>
+    <div class="card">
+      <h2>基本信息</h2>
+      <div class="row2">
+        <label class="f">档案名（school）
+          <input type="text" id="fSchool" size="24"></label>
+      </div>
+      <div class="row2">
+        <label class="f">组织名（OrganizationName）
+          <input type="text" id="fOrg" size="24" placeholder="留空 = 跟随档案名"></label>
+      </div>
+      <div class="hint">组织名是客户端「集控信息」里显示的名字，与档案名相互独立。留空则回落到档案名。</div>
+    </div>
+    <div class="card">
+      <h2>发布地址（publish.base_url）</h2>
+      <div class="row2">
+        <input type="text" id="fBase" style="flex:1;min-width:320px">
+      </div>
+      <div class="hint">静态文件的公开访问根地址，通常是仓库的 <b>raw</b> 地址（注意分支名要对）。
+        客户端就是从 <code>&lt;base_url&gt;/manifest.json</code> 拉配置的。</div>
+    </div>
+    <div class="card">
+      <h2>装机预设 ManagementPreset.json</h2>
+      <div class="row2">
+        <a class="btn" id="bPreset" href="/api/preset">下载 ManagementPreset.json</a>
+      </div>
+      <div class="hint">放到客户端<b>程序目录</b>下，ClassIsland 启动时会自动加载集控配置，免去每台大屏手填服务器地址。
+        文件里的 <code>ClassIdentity</code> 留空 —— 每台大屏装好后填自己的班级 id（就是 URL 里 <code>{id}</code> 的值）。</div>
+    </div>
   </div>
 
   <div class="card">
@@ -121,18 +249,32 @@ input:checked+.slider:before{transform:translateX(18px)}
 </main>
 
 <script>
-let ST=null, cur=0, curWeek=1, dirty=false;
+let ST=null, cur=0, curWeek=1, curTl=null, pane='pClass';
+// 改过的段集合。只把真的改过的段回传给后端：每重写一段都会丢掉该段内
+// 用户手写的自由注释，所以碰得越少越好。
+const D=new Set();
 const $=s=>document.querySelector(s);
+const el=(t,p={})=>Object.assign(document.createElement(t),p);
+
+const PANES=[
+  ['pClass','课表'],['pLayout','作息'],['pSubject','科目'],
+  ['pSettings','默认设置'],['pPolicy','集控策略'],['pSite','基本信息'],
+];
+// 每个页签对应哪些 yaml 段，用来在页签上标「已改」小圆点
+const PANE_SEC={pClass:['classes'],pLayout:['timelayouts'],pSubject:['subjects'],
+  pSettings:['settings'],pPolicy:['policy'],pSite:['school','organization','publish']};
 
 function toast(msg,kind){
-  const d=document.createElement('div');
-  d.className='toast '+(kind||'');
-  d.textContent=msg;
+  const d=el('div',{className:'toast '+(kind||''),textContent:msg});
   document.body.appendChild(d);
   setTimeout(()=>d.remove(), kind==='bad'?9000:4200);
 }
 function log(t){ $('#log').textContent=t; }
-function setDirty(v){ dirty=v; $('#dirty').textContent=v?'● 未保存':''; }
+function mark(sec){ D.add(sec); refreshDirty(); }
+function refreshDirty(){
+  $('#dirty').textContent=D.size?('● 未保存：'+[...D].join(' / ')):'';
+  renderNav();
+}
 
 async function api(path,body){
   const r=await fetch(path,{method:body?'POST':'GET',
@@ -141,6 +283,24 @@ async function api(path,body){
   const j=await r.json().catch(()=>({error:'响应不是 JSON'}));
   if(!r.ok) throw new Error(j.error||('HTTP '+r.status));
   return j;
+}
+
+function renderNav(){
+  const n=$('#nav'); n.innerHTML='';
+  PANES.forEach(([id,label])=>{
+    const changed=(PANE_SEC[id]||[]).some(s=>D.has(s));
+    const d=el('div',{className:'tab'+(id===pane?' on':'')});
+    d.innerHTML=label+(changed?' <span class="dot">●</span>':'');
+    d.onclick=()=>{pane=id;showPane()};
+    n.appendChild(d);
+  });
+}
+function showPane(){
+  PANES.forEach(([id])=>$('#'+id).hidden=(id!==pane));
+  renderNav();
+  if(pane==='pLayout') renderLayoutEditor();
+  if(pane==='pSubject') renderSubjects();
+  if(pane==='pSettings') renderSettings();
 }
 
 // ── 星期键解析：mon / mon@1 ────────────────────────────────
@@ -162,37 +322,47 @@ function setDay(cls,key,list,tl,dict){
   else cls.schedule[key]=list;
 }
 
+// 由 rawLayouts 现算 slots/marks，作息改完不必回服务器就能刷新课表网格
+function slotsOf(name){
+  const L=ST.rawLayouts[name];
+  if(!L) return {slots:[],marks:[]};
+  const slots=[],marks=[];
+  (L.items||[]).forEach(it=>{
+    if(it.type==='class') slots.push({start:it.start,end:it.end});
+    else if(it.type==='divider') marks.push({after:slots.length,kind:'divider'});
+    else if(it.type==='break'&&it.name) marks.push({after:slots.length,kind:'break',name:it.name});
+  });
+  return {slots,marks};
+}
+function recalcLayouts(){
+  ST.timelayouts={};
+  Object.keys(ST.rawLayouts).forEach(n=>ST.timelayouts[n]=slotsOf(n));
+}
+
+/* ══ 课表页 ══════════════════════════════════════════════ */
 function renderTabs(){
   const t=$('#tabs'); t.innerHTML='';
   ST.classes.forEach((c,i)=>{
-    const d=document.createElement('div');
-    d.className='tab'+(i===cur?' on':'')+(c.reserved?' res':'');
-    d.textContent=c.name+(c.reserved?'（预留）':'');
+    const d=el('div',{className:'tab'+(i===cur?' on':'')+(c.reserved?' res':''),
+      textContent:c.name+(c.reserved?'（预留）':'')});
     d.onclick=()=>{cur=i;render()};
     t.appendChild(d);
   });
 }
 
 function renderWeekTabs(cls){
-  // 这个班用到的轮换周序号集合
   const divs=new Set();
-  Object.keys(cls.schedule).forEach(k=>{
-    const p=parseDay(k); if(p) divs.add(p.div);
-  });
+  Object.keys(cls.schedule).forEach(k=>{const p=parseDay(k); if(p) divs.add(p.div)});
   const w=$('#wkTabs'); w.innerHTML='';
   const list=[...divs].sort();
-  if(list.length===1&&list[0]===0){ return; }   // 无轮换，不显示切换
+  if(list.length===1&&list[0]===0) return;      // 无轮换，不显示切换
   list.filter(d=>d>0).forEach(d=>{
-    const b=document.createElement('div');
-    b.className='tab'+(d===curWeek?' on':'');
-    b.textContent='第'+d+'周';
+    const b=el('div',{className:'tab'+(d===curWeek?' on':''),textContent:'第'+d+'周'});
     b.onclick=()=>{curWeek=d;render()};
     w.appendChild(b);
   });
   if(divs.has(0)){
-    const b=document.createElement('div');
-    b.className='tab'+(curWeek===0?' on':'');
-    b.textContent='每周相同';
+    const b=el('div',{className:'tab'+(curWeek===0?' on':''),textContent:'每周相同'});
     b.onclick=()=>{curWeek=0;render()};
     w.appendChild(b);
   }
@@ -200,35 +370,39 @@ function renderWeekTabs(cls){
 
 function render(){
   const cls=ST.classes[cur];
-  $('#school').textContent=ST.school+' · '+ST.base_url;
+  $('#school').textContent=(ST.organization||ST.school)+' · '+ST.base_url
+    +(ST.backupEnabled?'':' · 备份已关闭');
   renderTabs();
 
   $('#fId').value=cls.id;
   $('#fName').value=cls.name;
   $('#fWeeks').value=cls.weeks;
   const sel=$('#fTl'); sel.innerHTML='';
-  Object.keys(ST.timelayouts).forEach(n=>{
-    const o=document.createElement('option'); o.value=n; o.textContent=n;
+  Object.keys(ST.rawLayouts).forEach(n=>{
+    const o=el('option',{value:n,textContent:n});
     if(n===cls.timelayout) o.selected=true; sel.appendChild(o);
   });
 
   renderWeekTabs(cls);
   renderGrid(cls);
   renderPolicy();
+  renderSite();
+  renderNav();
 }
 
 function renderGrid(cls){
   const tb=$('#grid'); tb.innerHTML='';
   if(cls.reserved){
     tb.innerHTML='<tr><td style="padding:20px;color:var(--dim)">'+
-      '预留班级：已占住 id、尚未排课。<br>要开始排课，请在下方选好默认作息后点「转为正式班级」。'+
+      '预留班级：已占住 id、尚未排课。<br>要开始排课，请在上方选好默认作息后点「转为正式班级」。'+
       '</td></tr>';
     if(!$('#bAct')){
-      const b=document.createElement('button'); b.id='bAct'; b.className='primary';
-      b.textContent='转为正式班级'; b.style.marginTop='10px';
+      const b=el('button',{id:'bAct',className:'primary',textContent:'转为正式班级'});
+      b.style.marginTop='10px';
       b.onclick=()=>{
-        cls.reserved=false; cls.timelayout=cls.timelayout||Object.keys(ST.timelayouts)[0];
-        cls.schedule={}; setDirty(true); render();
+        cls.reserved=false;
+        cls.timelayout=cls.timelayout||Object.keys(ST.rawLayouts)[0];
+        cls.schedule={}; mark('classes'); render();
       };
       $('#cCls').appendChild(b);
     }
@@ -236,10 +410,8 @@ function renderGrid(cls){
   }
   const ab=$('#bAct'); if(ab) ab.remove();
 
-  // 本周视图下每天用哪个 key
   const cols=[];
   ST.dayOrder.forEach(d=>{
-    // 优先精确匹配当前周，其次无轮换键
     let key=null;
     if(cls.schedule[dayKey(d,curWeek)]!=null) key=dayKey(d,curWeek);
     else if(cls.schedule[d]!=null) key=d;
@@ -250,12 +422,11 @@ function renderGrid(cls){
     return;
   }
 
-  // 以班级默认作息的槽位为主轴；某天作息不同则单独取其槽位
   const mainTl=ST.timelayouts[cls.timelayout]||{slots:[],marks:[]};
   const maxRows=Math.max(mainTl.slots.length,
     ...cols.map(c=>(ST.timelayouts[getDay(cls,c.key).tl]||{slots:[]}).slots.length));
 
-  const thead=document.createElement('tr');
+  const thead=el('tr');
   thead.innerHTML='<th class="slot">节次 / 时间</th>'+
     cols.map(c=>{
       const g=getDay(cls,c.key);
@@ -265,34 +436,32 @@ function renderGrid(cls){
   tb.appendChild(thead);
 
   for(let r=0;r<maxRows;r++){
-    // 分割线标记（按主作息）
-    const mk=mainTl.marks.filter(m=>m.after===r);
-    mk.forEach(m=>{
-      const tr=document.createElement('tr');
+    mainTl.marks.filter(m=>m.after===r).forEach(m=>{
+      const tr=el('tr');
       tr.innerHTML=`<td class="mark" colspan="${cols.length+1}">${
         m.kind==='divider'?'──── 分割线 ────':'· '+m.name}</td>`;
       tb.appendChild(tr);
     });
 
-    const tr=document.createElement('tr');
+    const tr=el('tr');
     const s=mainTl.slots[r];
     tr.innerHTML=`<th class="slot">${r+1}　${s?s.start+'-'+s.end:''}</th>`;
     cols.forEach(c=>{
       const g=getDay(cls,c.key);
-      const td=document.createElement('td');
+      const td=el('td');
       if(r>=(ST.timelayouts[g.tl]||{slots:[]}).slots.length){
         td.style.background='#12161b'; tr.appendChild(td); return;
       }
       const v=g.list[r]||'';
       if(!v) td.className='empty';
-      const sl=document.createElement('select');
+      const sl=el('select');
       sl.innerHTML='<option value="">—</option>'+
         ST.subjects.map(n=>`<option${n===v?' selected':''}>${n}</option>`).join('');
       sl.onchange=()=>{
         g.list[r]=sl.value;
         setDay(cls,c.key,g.list,g.tl,g.dict);
         td.className=sl.value?'':'empty';
-        setDirty(true);
+        mark('classes');
       };
       td.appendChild(sl); tr.appendChild(td);
     });
@@ -300,39 +469,481 @@ function renderGrid(cls){
   }
 }
 
+/* ══ 作息编辑 ════════════════════════════════════════════ */
+const TYPE_LABEL={class:'上课',break:'课间',divider:'分割线',action:'行动'};
+
+// 哪些班级在用这个作息（默认作息或某天覆盖）——删除/改名前必须查
+function layoutUsers(name){
+  const out=[];
+  ST.classes.forEach(c=>{
+    if(c.reserved) return;
+    let used=(c.timelayout===name);
+    Object.keys(c.schedule||{}).forEach(k=>{
+      const g=getDay(c,k); if(g&&g.tl===name) used=true;
+    });
+    if(used) out.push(c.name||c.id);
+  });
+  return out;
+}
+
+// 上课节数变了，所有用此作息的天都要跟着增删格子。
+// 不同步的后果：build.py 会报「填了 6 节课，但时间表有 7 个上课时间点」
+// 而拒绝保存 —— 报错是对的（空课表会把大屏刷白），但不同步就会把用户
+// 卡在一个无法保存的状态里：改作息本身是合法操作，不应该变成死胡同。
+// at = 插入/删除的上课序号（0-based），delta = +1 / -1。
+function syncClassSlots(layoutName, at, delta){
+  let touched=0;
+  ST.classes.forEach(c=>{
+    if(c.reserved) return;
+    Object.keys(c.schedule||{}).forEach(k=>{
+      const g=getDay(c,k);
+      if(!g||g.tl!==layoutName) return;
+      if(delta>0) g.list.splice(at,0,'');        // 新增节次：插空格（= ~ 无课）
+      else g.list.splice(at,1);                  // 删节次：抽掉对应格子
+      setDay(c,k,g.list,g.tl,g.dict);
+      touched++;
+    });
+  });
+  if(touched) mark('classes');
+  return touched;
+}
+// 第 i 项之前有多少个「上课」—— 即它在课表网格里的行号
+function classIndexOf(items, i){
+  let n=0;
+  for(let j=0;j<i;j++) if(items[j].type==='class') n++;
+  return n;
+}
+
+function renderLayoutEditor(){
+  const names=Object.keys(ST.rawLayouts);
+  if(!names.length){ $('#tlTable').innerHTML=''; $('#tlTabs').innerHTML=
+    '<span class="hint">还没有作息表，点「+ 新建作息」开始。</span>'; return; }
+  if(!curTl||!ST.rawLayouts[curTl]) curTl=names[0];
+
+  const t=$('#tlTabs'); t.innerHTML='';
+  names.forEach(n=>{
+    const d=el('div',{className:'tab'+(n===curTl?' on':''),textContent:n});
+    d.onclick=()=>{curTl=n;renderLayoutEditor()};
+    t.appendChild(d);
+  });
+
+  const L=ST.rawLayouts[curTl];
+  $('#tlGuid').textContent=L.guid?('guid: '+L.guid+'（钉桩，只读）'):'guid: 由名称派生';
+  const users=layoutUsers(curTl);
+  $('#tlWarn').innerHTML=users.length
+    ? `<div class="warnbox">此作息正被 <b>${users.length}</b> 个班级使用：${users.join('、')}。
+       增删「上课」项会改变这些班级课表的节数。</div>`
+    : '';
+
+  const tb=$('#tlTable'); tb.innerHTML='';
+  const head=el('tr');
+  head.innerHTML='<th style="width:60px">#</th><th style="width:110px">类型</th>'
+    +'<th style="width:120px">开始</th><th style="width:120px">结束</th>'
+    +'<th>名称（课间可填，如「大课间」）</th><th style="width:1%">操作</th>';
+  tb.appendChild(head);
+
+  let nClass=0;
+  (L.items||[]).forEach((it,i)=>{
+    const tr=el('tr');
+    const isSpan=(it.type==='class'||it.type==='break');
+    if(it.type==='class') nClass++;
+
+    const c0=el('td',{className:'mono',
+      textContent:it.type==='class'?('第'+nClass+'节'):''});
+    tr.appendChild(c0);
+
+    const tdT=el('td');
+    const selT=el('select',{className:'inp'});
+    Object.keys(TYPE_LABEL).forEach(k=>{
+      const o=el('option',{value:k,textContent:TYPE_LABEL[k]});
+      if(k===it.type) o.selected=true; selT.appendChild(o);
+    });
+    selT.onchange=()=>{
+      const was=it.type, now=selT.value;
+      if(was===now) return;
+      // 进出「上课」会改变课表行数，得跟着同步格子
+      if(was==='class'||now==='class'){
+        const at=classIndexOf(L.items,i);
+        if(was==='class'&&!confirm('把第 '+(at+1)+' 节「上课」改成「'+TYPE_LABEL[now]
+          +'」会让用此作息的班级少一节课，该节已排的课程会被移除。确定？')){
+          selT.value=was; return;
+        }
+        syncClassSlots(curTl, at, now==='class'?+1:-1);
+      }
+      it.type=now;
+      // 切成零长度标记时清掉 end，避免残留一个看起来能调的时长
+      if(it.type==='divider'||it.type==='action') it.end='';
+      if(it.type!=='break') it.name='';
+      mark('timelayouts'); recalcLayouts(); renderLayoutEditor();
+    };
+    tdT.appendChild(selT); tr.appendChild(tdT);
+
+    [['start',true],['end',isSpan]].forEach(([k,on])=>{
+      const td=el('td');
+      if(on){
+        const ip=el('input',{type:'time',value:it[k]||''});
+        ip.oninput=()=>{it[k]=ip.value;mark('timelayouts')};
+        td.appendChild(ip);
+      }else{ td.className='mono'; td.textContent='—'; }
+      tr.appendChild(td);
+    });
+
+    const tdN=el('td');
+    if(it.type==='break'){
+      const ip=el('input',{type:'text',value:it.name||'',placeholder:'可留空'});
+      ip.oninput=()=>{it.name=ip.value;mark('timelayouts')};
+      tdN.appendChild(ip);
+    }else{ tdN.className='mono'; tdN.textContent=TYPE_LABEL[it.type]+'（无名称）'; }
+    tr.appendChild(tdN);
+
+    const tdC=el('td',{className:'ctl'});
+    const up=el('button',{className:'sm',textContent:'↑',disabled:i===0});
+    up.onclick=()=>{const a=L.items;[a[i-1],a[i]]=[a[i],a[i-1]];mark('timelayouts');renderLayoutEditor()};
+    const dn=el('button',{className:'sm',textContent:'↓',disabled:i===L.items.length-1});
+    dn.onclick=()=>{const a=L.items;[a[i+1],a[i]]=[a[i],a[i+1]];mark('timelayouts');renderLayoutEditor()};
+    const rm=el('button',{className:'sm danger',textContent:'删'});
+    rm.onclick=()=>{
+      if(it.type==='class'){
+        if(!confirm('删除第 '+nClass+' 节「上课」：所有用此作息的班级课表会少一行，'
+          +'该节已排的课程被移除，之后的课程整体上移。确定？')) return;
+        syncClassSlots(curTl, classIndexOf(L.items,i), -1);
+      }
+      L.items.splice(i,1);
+      mark('timelayouts'); recalcLayouts(); renderLayoutEditor();
+    };
+    [up,dn,rm].forEach(b=>tdC.appendChild(b));
+    tr.appendChild(tdC);
+    tb.appendChild(tr);
+  });
+}
+
+function addItem(type){
+  const L=ST.rawLayouts[curTl];
+  if(!L){ toast('先新建一个作息表','warn'); return; }
+  // 新项默认接在最后一项之后，省得每次都手填
+  const last=(L.items||[]).filter(x=>x.end).slice(-1)[0];
+  const st=last?last.end:'08:00';
+  const end=(type==='class'||type==='break')?addMin(st,type==='class'?40:10):'';
+  L.items.push({start:st,end,type,name:''});
+  // 新增上课节次 → 给用此作息的所有天末尾追一个空格，
+  // 否则保存时 build.py 会以「节数不一致」直接抦下
+  if(type==='class'){
+    const n=syncClassSlots(curTl, classIndexOf(L.items,L.items.length-1), +1);
+    if(n) toast('已同步 '+n+' 天的课表：新节次留空（无课），去课表页填上即可','warn');
+  }
+  mark('timelayouts'); recalcLayouts(); renderLayoutEditor();
+}
+function addMin(hhmm,m){
+  const p=String(hhmm).split(':').map(Number);
+  let t=(p[0]||0)*60+(p[1]||0)+m;
+  t=((t%1440)+1440)%1440;
+  return String(Math.floor(t/60)).padStart(2,'0')+':'+String(t%60).padStart(2,'0');
+}
+
+$('#tlAdd').onclick=()=>{
+  const n=(prompt('新作息名称','新作息')||'').trim();
+  if(!n) return;
+  if(ST.rawLayouts[n]){ toast('已存在同名作息','bad'); return; }
+  ST.rawLayouts[n]={guid:null,items:[]};
+  curTl=n; mark('timelayouts'); recalcLayouts(); renderLayoutEditor();
+};
+$('#tlRename').onclick=()=>{
+  if(!curTl) return;
+  const users=layoutUsers(curTl);
+  const n=(prompt('新名称（引用此作息的班级会一并改写）',curTl)||'').trim();
+  if(!n||n===curTl) return;
+  if(ST.rawLayouts[n]){ toast('已存在同名作息','bad'); return; }
+  // 不钉 guid 时 GUID 由名称派生：改名 = 换 GUID。线上已发布过就必须先钉住，
+  // 否则线上课表的 TimeLayoutId 会全部悬空。
+  if(!ST.rawLayouts[curTl].guid&&users.length&&
+     !confirm('此作息没有 guid 钉桩，GUID 由名称派生 —— 改名等于换一个新 GUID。\n'
+      +'若它已发布到线上，线上课表会引用不到（静默损坏）。\n'
+      +'建议先在 yaml 里用 guid: 钉住线上既有 GUID。\n仍要改名？')) return;
+  // 保持键顺序：重建一遍 map，别用 delete + 追加（那样会跳到末尾，diff 变大）
+  const next={};
+  Object.keys(ST.rawLayouts).forEach(k=>{
+    next[k===curTl?n:k]=ST.rawLayouts[k];
+  });
+  ST.rawLayouts=next;
+  ST.classes.forEach(c=>{
+    if(c.timelayout===curTl) c.timelayout=n;
+    Object.keys(c.schedule||{}).forEach(k=>{
+      const s=c.schedule[k];
+      if(s&&!Array.isArray(s)&&s.timelayout===curTl) s.timelayout=n;
+    });
+  });
+  curTl=n; mark('timelayouts'); mark('classes'); recalcLayouts(); renderLayoutEditor();
+};
+$('#tlDel').onclick=()=>{
+  if(!curTl) return;
+  const users=layoutUsers(curTl);
+  if(users.length){
+    toast('无法删除：仍有 '+users.length+' 个班级在用此作息（'+users.join('、')
+      +'）。\n请先把它们改到别的作息。','bad');
+    return;
+  }
+  if(!confirm('删除作息「'+curTl+'」？')) return;
+  delete ST.rawLayouts[curTl]; curTl=null;
+  mark('timelayouts'); recalcLayouts(); renderLayoutEditor();
+};
+$('#tlAddClass').onclick=()=>addItem('class');
+$('#tlAddBreak').onclick=()=>addItem('break');
+$('#tlAddDiv').onclick=()=>addItem('divider');
+$('#tlAddAct').onclick=()=>addItem('action');
+
+/* ══ 科目 ════════════════════════════════════════════════ */
+// 科目在课表里被用到几次 —— 删之前得知道
+function subjectUses(name){
+  let n=0;
+  ST.classes.forEach(c=>Object.keys(c.schedule||{}).forEach(k=>{
+    const g=getDay(c,k); if(g) g.list.forEach(v=>{ if(v===name) n++ });
+  }));
+  return n;
+}
+
+function renderSubjects(){
+  const tb=$('#subTable'); tb.innerHTML='';
+  const head=el('tr');
+  head.innerHTML='<th>名称</th><th style="width:90px">简称</th>'
+    +'<th style="width:130px">教师</th><th style="width:70px">户外</th>'
+    +'<th style="width:150px">guid</th><th style="width:1%">操作</th>';
+  tb.appendChild(head);
+
+  const names=Object.keys(ST.customSubjects);
+  if(!names.length){
+    const tr=el('tr');
+    tr.innerHTML='<td colspan="6" style="padding:14px;color:var(--dim)">'
+      +'没有自定义科目。官方 21 科直接在课表里写名字即可，无需登记。</td>';
+    tb.appendChild(tr);
+  }
+
+  names.forEach(name=>{
+    const m=ST.customSubjects[name];
+    const tr=el('tr');
+
+    const tdN=el('td');
+    const ipN=el('input',{type:'text',value:name});
+    ipN.onchange=()=>{
+      const nn=ipN.value.trim();
+      if(nn===name) return;
+      if(!nn){ toast('科目名不能为空','bad'); ipN.value=name; return; }
+      if(ST.customSubjects[nn]||ST.officialSubjects.includes(nn)){
+        toast('已存在同名科目（或与官方科目重名）','bad'); ipN.value=name; return; }
+      const uses=subjectUses(name);
+      // 改名不会自动改课表：课表里写的是科目名，改完对不上会在构建时报错
+      if(uses&&!confirm('课表里有 '+uses+' 处在用「'+name+'」。\n'
+        +'改名后这些格子会指向一个不存在的科目，构建会报错。\n'
+        +'（可以改完名再回课表把它们逐个改过来）\n继续？')) { ipN.value=name; return; }
+      const next={};
+      Object.keys(ST.customSubjects).forEach(k=>{
+        next[k===name?nn:k]=ST.customSubjects[k];
+      });
+      ST.customSubjects=next;
+      rebuildSubjectList(); mark('subjects'); renderSubjects();
+    };
+    tdN.appendChild(ipN); tr.appendChild(tdN);
+
+    [['initial','首字'],['teacher','可留空']].forEach(([k,ph])=>{
+      const td=el('td');
+      const ip=el('input',{type:'text',value:m[k]||'',placeholder:ph});
+      ip.oninput=()=>{m[k]=ip.value;mark('subjects')};
+      td.appendChild(ip); tr.appendChild(td);
+    });
+
+    const tdO=el('td');
+    const cb=el('input',{type:'checkbox',checked:!!m.outdoor});
+    cb.onchange=()=>{m.outdoor=cb.checked;mark('subjects')};
+    tdO.appendChild(cb); tr.appendChild(tdO);
+
+    const tdG=el('td',{className:'mono'});
+    tdG.textContent=m.guid?m.guid.slice(0,8)+'…（钉桩）':'派生';
+    tdG.title=m.guid||'GUID 由科目名 uuid5 派生';
+    tr.appendChild(tdG);
+
+    const tdC=el('td',{className:'ctl'});
+    const rm=el('button',{className:'sm danger',textContent:'删'});
+    rm.onclick=()=>{
+      const uses=subjectUses(name);
+      if(uses){ toast('无法删除：课表里还有 '+uses+' 处在用「'+name+'」。','bad'); return; }
+      delete ST.customSubjects[name];
+      rebuildSubjectList(); mark('subjects'); renderSubjects();
+    };
+    tdC.appendChild(rm); tr.appendChild(tdC);
+    tb.appendChild(tr);
+  });
+
+  $('#offCount').textContent=ST.officialSubjects.length;
+  $('#offList').innerHTML=ST.officialSubjects
+    .map(n=>`<span class="pill">${n}</span>`).join('');
+}
+function rebuildSubjectList(){
+  ST.subjects=[...new Set([...ST.officialSubjects,...Object.keys(ST.customSubjects)])].sort();
+}
+$('#subAdd').onclick=()=>{
+  const n=(prompt('科目名称')||'').trim();
+  if(!n) return;
+  if(ST.officialSubjects.includes(n)){ toast('这是官方科目，无需登记','warn'); return; }
+  if(ST.customSubjects[n]){ toast('已存在','bad'); return; }
+  ST.customSubjects[n]={guid:null,initial:'',teacher:'',outdoor:false};
+  rebuildSubjectList(); mark('subjects'); renderSubjects();
+};
+
+/* ══ 默认设置 ════════════════════════════════════════════ */
+// 界面上按「行」维护，避免用对象直接绑定 —— 键改一半时不能丢值
+let setRows=null;
+function typeOf(v){
+  if(typeof v==='boolean') return 'bool';
+  if(typeof v==='number') return 'num';
+  if(typeof v==='string') return 'str';
+  return 'json';
+}
+function toText(v,t){
+  if(t==='json') return JSON.stringify(v===undefined?null:v);
+  if(t==='bool') return v?'true':'false';
+  return String(v===undefined||v===null?'':v);
+}
+function renderSettings(){
+  if(setRows===null){
+    setRows=Object.keys(ST.settings||{}).map(k=>{
+      const t=typeOf(ST.settings[k]);
+      return {k,t,v:toText(ST.settings[k],t)};
+    });
+  }
+  const tb=$('#setTable'); tb.innerHTML='';
+  const head=el('tr');
+  head.innerHTML='<th style="width:38%">键（ClassIsland 设置名）</th>'
+    +'<th style="width:110px">类型</th><th>值</th><th style="width:1%">操作</th>';
+  tb.appendChild(head);
+  if(!setRows.length){
+    const tr=el('tr');
+    tr.innerHTML='<td colspan="4" style="padding:14px;color:var(--dim)">'
+      +'未配置默认设置：manifest 不会带 DefaultSettingsSource，客户端保留本机设置。</td>';
+    tb.appendChild(tr);
+  }
+  setRows.forEach((row,i)=>{
+    const tr=el('tr');
+
+    const tdK=el('td');
+    const ipK=el('input',{type:'text',value:row.k,placeholder:'如 Theme'});
+    ipK.oninput=()=>{row.k=ipK.value;mark('settings')};
+    tdK.appendChild(ipK); tr.appendChild(tdK);
+
+    const tdT=el('td');
+    const sel=el('select',{className:'inp'});
+    [['bool','布尔'],['num','数字'],['str','文本'],['json','JSON']].forEach(([v,l])=>{
+      const o=el('option',{value:v,textContent:l});
+      if(v===row.t) o.selected=true; sel.appendChild(o);
+    });
+    sel.onchange=()=>{row.t=sel.value;mark('settings');renderSettings()};
+    tdT.appendChild(sel); tr.appendChild(tdT);
+
+    const tdV=el('td');
+    if(row.t==='bool'){
+      const s2=el('select',{className:'inp'});
+      ['true','false'].forEach(v=>{
+        const o=el('option',{value:v,textContent:v});
+        if(v===String(row.v)) o.selected=true; s2.appendChild(o);
+      });
+      s2.onchange=()=>{row.v=s2.value;mark('settings')};
+      tdV.appendChild(s2);
+    }else{
+      const ip=el('input',{type:'text',value:row.v,
+        placeholder:row.t==='json'?'如 [1, 2] 或 {"A": true}':''});
+      ip.oninput=()=>{row.v=ip.value;mark('settings')};
+      tdV.appendChild(ip);
+    }
+    tr.appendChild(tdV);
+
+    const tdC=el('td',{className:'ctl'});
+    const rm=el('button',{className:'sm danger',textContent:'删'});
+    rm.onclick=()=>{setRows.splice(i,1);mark('settings');renderSettings()};
+    tdC.appendChild(rm); tr.appendChild(tdC);
+    tb.appendChild(tr);
+  });
+}
+$('#setAdd').onclick=()=>{
+  if(setRows===null) renderSettings();
+  setRows.push({k:'',t:'bool',v:'true'});
+  mark('settings'); renderSettings();
+};
+// 把界面行折成 settings 对象；解析失败就地报错，绝不静默写个字符串上去
+function collectSettings(){
+  // ⚠️ setRows 为 null = 「设置页从未渲染过」，不等于「用户清空了设置」。
+  // 这里若返回 {} 会把已有的 settings 整段抹掉，而且不报错 ——
+  // 属于静默数据丢失。未编辑过就原样回写服务端读到的值。
+  if(setRows===null) return ST.settings||{};
+  const out={};
+  (setRows||[]).forEach(r=>{
+    const k=(r.k||'').trim();
+    if(!k) return;                       // 空键直接忽略（用户还没填完）
+    if(k in out) throw new Error('设置项键名重复：'+k);
+    if(r.t==='bool') out[k]=(String(r.v)==='true');
+    else if(r.t==='num'){
+      const n=Number(r.v);
+      if(r.v==='' || Number.isNaN(n)) throw new Error(`设置项 ${k} 的值不是数字：${r.v}`);
+      out[k]=n;
+    }
+    else if(r.t==='json'){
+      try{ out[k]=JSON.parse(r.v); }
+      catch(e){ throw new Error(`设置项 ${k} 的 JSON 无法解析：${e.message}`); }
+    }
+    else out[k]=String(r.v);
+  });
+  return out;
+}
+
+/* ══ 策略 / 基本信息 ═════════════════════════════════════ */
 function renderPolicy(){
   const g=$('#pol'); g.innerHTML='';
   ST.policyOrder.forEach(k=>{
-    const d=document.createElement('div'); d.className='sw';
+    const d=el('div',{className:'sw'});
     d.innerHTML=`<span>${ST.policyLabel[k]||k}<br>
       <span style="color:var(--dim);font-size:11px">${k}</span></span>
       <label class="toggle"><input type="checkbox"${ST.policy[k]?' checked':''}>
       <span class="slider"></span></label>`;
-    d.querySelector('input').onchange=e=>{ST.policy[k]=e.target.checked;setDirty(true)};
+    d.querySelector('input').onchange=e=>{ST.policy[k]=e.target.checked;mark('policy')};
     g.appendChild(d);
   });
 }
+function renderSite(){
+  $('#fSchool').value=ST.school||'';
+  $('#fOrg').value=ST.organization||'';
+  $('#fBase').value=ST.base_url||'';
+}
+$('#fSchool').oninput=()=>{ST.school=$('#fSchool').value;mark('school')};
+$('#fOrg').oninput=()=>{ST.organization=$('#fOrg').value;mark('organization')};
+$('#fBase').oninput=()=>{ST.base_url=$('#fBase').value;mark('publish')};
 
-// ── 动作 ───────────────────────────────────────────────────
+/* ══ 动作 ════════════════════════════════════════════════ */
 function payload(){
-  // 回传时把 id 还原成字符串，name/weeks 取界面值
-  const cls=ST.classes[cur];
-  cls.name=$('#fName').value.trim();
-  cls.timelayout=$('#fTl').value;
-  cls.weeks=parseInt($('#fWeeks').value)||2;
-  return {policy:ST.policy, classes:ST.classes};
+  const body={sections:[...D]};
+  if(D.has('policy')) body.policy=ST.policy;
+  if(D.has('classes')) body.classes=ST.classes;
+  if(D.has('timelayouts')) body.timelayouts=ST.rawLayouts;
+  if(D.has('subjects')) body.subjects=ST.customSubjects;
+  if(D.has('settings')) body.settings=collectSettings();   // 可能抛错，交给调用方
+  if(D.has('school')) body.school=ST.school;
+  if(D.has('organization')) body.organization=ST.organization;
+  if(D.has('publish')) body.base_url=ST.base_url;
+  return body;
 }
 function busy(b){ ['#bSave','#bBuild','#bPre','#bPub'].forEach(s=>$(s).disabled=b); }
 
 $('#bSave').onclick=async()=>{
+  if(!D.size){ toast('没有改动，无需保存','warn'); return; }
+  let body;
+  try{ body=payload(); }
+  catch(e){ toast('保存前校验失败：'+e.message,'bad'); log('✗ '+e.message); return; }
   busy(true);
   try{
-    const r=await api('/api/save',payload());
-    setDirty(false);
-    let m='已保存（备份 '+r.backup+'）';
+    const r=await api('/api/save',body);
+    D.clear(); refreshDirty();
+    let m='已保存（段：'+(r.sections||[]).join('/')+'）'
+      +(r.backup?'（备份 '+r.backup+'）':'（备份已关闭）');
     if(r.warnings&&r.warnings.length){ m+='\n⚠ '+r.warnings.join('\n⚠ '); toast(m,'warn'); }
     else toast(m,'ok');
     log(m);
+    await reload();          // 重新拉一遍：guid 派生、槽位变化都以服务端为准
   }catch(e){ toast('保存失败：'+e.message,'bad'); log('✗ '+e.message); }
   finally{ busy(false); }
 };
@@ -356,10 +967,11 @@ $('#bPre').onclick=async()=>{
 };
 
 $('#bPub').onclick=async()=>{
-  if(dirty&&!confirm('有未保存的改动，发布用的是已保存内容。继续？')) return;
+  if(D.size&&!confirm('有未保存的改动（'+[...D].join('/')+'），发布用的是已保存内容。继续？')) return;
   const msg=prompt('提交说明（可留空）','由流水线生成：课表更新');
   if(msg===null) return;
-  if(!confirm('将覆盖线上文件并 push 到 Gitee。\n（覆盖前自动备份到 NAS，预检不通过会中止）\n确定？')) return;
+  if(!confirm('将覆盖线上文件并 push。\n（预检不通过会中止'
+    +(ST.backupEnabled?'；覆盖前自动备份':'')+'）\n确定？')) return;
   busy(true); log('发布中…');
   try{ const r=await api('/api/publish',{message:msg});
     log(r.steps.map(s=>'$ '+s.cmd+'  → rc='+s.rc+'\n'+s.out).join('\n'));
@@ -371,14 +983,25 @@ $('#bPub').onclick=async()=>{
   finally{ busy(false); }
 };
 
-$('#fName').oninput=()=>setDirty(true);
-$('#fWeeks').oninput=()=>setDirty(true);
-$('#fTl').onchange=()=>{setDirty(true);ST.classes[cur].timelayout=$('#fTl').value;render()};
+$('#fName').oninput=()=>{ST.classes[cur].name=$('#fName').value;mark('classes')};
+$('#fWeeks').oninput=()=>{
+  ST.classes[cur].weeks=parseInt($('#fWeeks').value)||2; mark('classes');
+};
+$('#fTl').onchange=()=>{
+  ST.classes[cur].timelayout=$('#fTl').value; mark('classes'); render();
+};
 
-window.onbeforeunload=()=>dirty?'有未保存的改动':null;
+window.onbeforeunload=()=>D.size?'有未保存的改动':null;
 
+async function reload(){
+  ST=await api('/api/state');
+  setRows=null;                  // 设置行从新 state 重建
+  recalcLayouts();
+  if(cur>=ST.classes.length) cur=0;
+  render(); showPane();
+}
 (async()=>{
-  try{ ST=await api('/api/state'); render(); log('已载入 '+ST.file); }
+  try{ await reload(); log('已载入 '+ST.file); }
   catch(e){ log('✗ 载入失败：'+e.message); toast(e.message,'bad'); }
 })();
 </script>

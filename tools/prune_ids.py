@@ -111,15 +111,21 @@ def main() -> int:
         return 0
 
     # ── 真的删:先备份 ────────────────────────────────────────
+    # 备份可在 config.json 里关闭(backup_dir 留空)。关闭时仍可删除:
+    # 这里用的是 git rm,历史在目标仓库里,随时能 git revert 捞回来。
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"\n── 删除前备份到 {BACKUP_DIR} ──")
-    for cid in orphan:
-        f = live / cid / "classplans.json"
-        if f.exists():
-            dst = BACKUP_DIR / f"{ts}.{cid}.classplans.json"
-            shutil.copy2(f, dst)
-            print(f"  ✓ {dst.name}")
+    if BACKUP_DIR is not None:
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        print(f"\n── 删除前备份到 {BACKUP_DIR} ──")
+        for cid in orphan:
+            f = live / cid / "classplans.json"
+            if f.exists():
+                dst = BACKUP_DIR / f"{ts}.{cid}.classplans.json"
+                shutil.copy2(f, dst)
+                print(f"  ✓ {dst.name}")
+    else:
+        print("\n── 备份已关闭(config.json 的 backup_dir 为空);"
+              "依赖 git 历史回滚 ──")
 
     print("\n── 删除(用 git rm,保留可回滚历史) ──")
     env = appconfig.git_env()
@@ -144,7 +150,8 @@ def main() -> int:
         print(f"\n✗ {len(failed)} 个目录删除失败")
         return 1
 
-    print("\n✓ 清理完成。备份已存 NAS,可用 git 回滚。")
+    print("\n✓ 清理完成。" + ("备份已保存," if BACKUP_DIR else "")
+          + "可用 git 回滚。")
     print("  下一步:跑 split.py + preflight.py,再 commit & push。")
     return 0
 

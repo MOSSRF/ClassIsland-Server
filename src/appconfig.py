@@ -14,7 +14,11 @@ appconfig.py — 环境相关配置的唯一来源
 
 配置项：
     live_repo   线上集控仓库的本地副本路径（发布目标）
-    backup_dir  备份目录（保存 yaml / 覆盖前的线上文件）
+    backup_dir  备份目录（保存 yaml / 覆盖前的线上文件）。
+                置为空字符串 = 关闭备份。
+                （备份只是本地保险，不是流水线的必要环节：真正的历史在
+                 目标仓库的 git 里。所以它必须可关，否则就是把某台特定
+                 机器的使用习惯强加给所有人。）
     git_exec_path
                 仅在 git 的 --exec-path 不正确时才需要设置。
                 典型场景：某些 NAS 套件版 git 把 exec-path 指到不存在的
@@ -58,7 +62,13 @@ def _load() -> dict:
             raise SystemExit(
                 f"✗ config.json 含未知配置项: {sorted(unknown)}；"
                 f"可用: {sorted(_DEFAULTS)}")
-        cfg.update({k: v for k, v in user.items() if v not in (None, "")})
+        for k, v in user.items():
+            if v is None:
+                continue
+            # backup_dir 允许显式空串（= 关闭备份），其余空值视为「不覆盖默认」
+            if v == "" and k != "backup_dir":
+                continue
+            cfg[k] = v
 
     for k in _DEFAULTS:
         v = os.environ.get(_ENV_PREFIX + k.upper())
@@ -77,8 +87,14 @@ def live_repo() -> Path:
     return Path(get("live_repo")).expanduser()
 
 
-def backup_dir() -> Path:
-    return Path(get("backup_dir")).expanduser()
+def backup_dir() -> Path | None:
+    """备份目录；返回 None 表示用户显式关闭了备份。
+
+    调用方必须处理 None —— 直接 Path("") 会变成当前目录，
+    把备份文件糊到项目根下，属于典型的静默错行为。
+    """
+    v = (get("backup_dir") or "").strip()
+    return Path(v).expanduser() if v else None
 
 
 def git_branch() -> str:
