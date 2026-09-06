@@ -129,7 +129,7 @@ def build_timelayouts(spec: dict, warnings: list | None = None) -> tuple[dict, d
         # 且行动项可以出现在任意位置（实测线上 '秋季时间表' 第3项
         # 就是 13:10 的行动，插在 08:00 之前），所以均不参与递增校验。
         #
-        # 重叠只告警不报错：线上真实作息（安仁中学正在生产使用）存在
+        # 重叠只告警不报错：线上真实作息（生产环境实例）存在
         # 午休课间 12:35-14:10 包含下午首节 13:20-14:00 的写法，
         # 客户端容忍这种嵌套。强行报错会阻止合法的存量数据入库。
         axis = [(i, x) for i, x in enumerate(layouts, 1)
@@ -200,17 +200,36 @@ def build_subjects(spec: dict, used: set[str]) -> tuple[dict, dict]:
 
 
 def build(doc: dict, warnings: list | None = None,
-          plan_owner: dict | None = None) -> dict:
+          plan_owner: dict | None = None,
+          class_subjects: dict | None = None,
+          class_timelayouts: dict | None = None) -> dict:
     """构建完整 Profile。
 
     plan_owner：可选出参，回填 {课表GUID: 班级id}。
     split.py 靠它把课表分到各班目录，避免用班级名做前缀匹配
     （名字重名或含空格时前缀匹配会串班，是静默错输出）。
+
+    class_subjects：可选出参，回填 {班级id: {科目GUID: 科目记录}}。
+    每班一份独立科目表的数据源。班级可用 `subjects:` 段覆盖老师名等
+    字段，覆盖只作用于本班 —— 这正是「按班独立」与旧版全校共用的区别。
+
+    class_timelayouts：可选出参，回填 {班级id: {作息GUID: 作息记录}}。
+    只包含该班真正引用到的作息（班级默认 + 各天覆盖），
+    避免把全校 5 套作息都下发给每个班。
+
+    ⚠️ 科目/作息 GUID 在各班之间保持一致（不按班派生）。
+    各班只加载自己那份文件，GUID 不冲突；而保持一致可以让
+    既有 classplans.json 的 SubjectId / TimeLayoutId 继续有效。
+    按班派生新 GUID 会让线上所有课表的引用瞬间悬空 —— 静默损坏。
     """
     if warnings is None:
         warnings = []
     if plan_owner is None:
         plan_owner = {}
+    if class_subjects is None:
+        class_subjects = {}
+    if class_timelayouts is None:
+        class_timelayouts = {}
     tls, tl_index = build_timelayouts(doc.get("timelayouts"), warnings)
 
     classes_spec = doc.get("classes") or []
@@ -224,6 +243,10 @@ def build(doc: dict, warnings: list | None = None,
             for s in iter_day_classes(spec):
                 if s:
                     used.add(str(s))
+        # 班级私有科目覆盖里出现的名字同样要参与校验，
+        # 否则给一个拼错的科目名配老师会被静默忽略。
+        for s in (c.get("subjects") or {}):
+            used.add(str(s))
 
     subs, sub_index = build_subjects(doc.get("subjects"), used)
 
@@ -263,6 +286,39 @@ def build(doc: dict, warnings: list | None = None,
                 f"{seen_names[cname]!r} 和 {cid!r}")
         seen_names[cname] = cid
 
+        # ── 本班独立科目表 ─────────────────────────────
+        # 以全局科目表为底，叠加班级自己的 subjects: 覆盖（主要是老师名）。
+        # GUID 不变：各班只加载自己那份文件，不会冲突；且保持 GUID 稳定
+        # 才能让班级自己的 classplans.json 里的 SubjectId 继续命中。
+        cls_sub_spec = c.get("subjects") or {}
+        if not isinstance(cls_sub_spec, dict):
+            raise BuildError(
+                f"班级 {cid!r} 的 subjects 应为映射（科目名: {{teacher: ...}}），"
+                f"实际是 {type(cls_sub_spec).__name__}")
+        my_subs: dict = {}
+        for sname, sgid in sub_index.items():
+            rec = dict(subs[sgid])
+            ov = cls_sub_spec.get(sname)
+            if ov:
+                if not isinstance(ov, dict):
+                    raise BuildError(
+                        f"班级 {cid!r} 科目 {sname!r} 的覆盖应为映射，"
+                        f"如 {{teacher: 张三}}；实际是 {type(ov).__name__}")
+                unknown_k = set(ov) - {"teacher", "initial", "outdoor"}
+                if unknown_k:
+                    # 拼错键静默忽略 = 老师名没生效且不报错，直接拦下
+                    raise BuildError(
+                        f"班级 {cid!r} 科目 {sname!r} 含未知字段 "
+                        f"{sorted(unknown_k)}；可用: teacher / initial / outdoor")
+                if ov.get("teacher"):
+                    rec["TeacherName"] = str(ov["teacher"])
+                if ov.get("initial"):
+                    rec["Initial"] = str(ov["initial"])
+                if "outdoor" in ov:
+                    rec["IsOutDoor"] = bool(ov["outdoor"])
+            my_subs[sgid] = rec
+        class_subjects[cid] = my_subs
+
         sched = c.get("schedule") or {}
         reserved = bool(c.get("reserved", False))
         # 预留班级：先占住 id，课表以后再填。
@@ -292,6 +348,9 @@ def build(doc: dict, warnings: list | None = None,
         weeks_total = int(c.get("weeks", 2))
         if weeks_total < 2:
             raise BuildError(f"班级 {cid!r} weeks 必须 >= 2（当前 {weeks_total}）")
+
+        # 本班用到的作息 GUID（班级默认 + 各天覆盖）
+        my_tl_gids: set[str] = {tl_index[tl_name][0]}
 
         for daykey, spec in (c.get("schedule") or {}).items():
             # ── 解析 "mon" / "mon@1"（@n = 多周轮换中的第 n 周） ──
@@ -328,6 +387,7 @@ def build(doc: dict, warnings: list | None = None,
                     f"班级 {cid!r} {daykey!r} 引用了不存在的时间表 {day_tl!r}；"
                     f"可用: {sorted(tl_index)}")
             day_gid, n_slots = tl_index[day_tl]
+            my_tl_gids.add(day_gid)
 
             lst = lst or []
             if len(lst) != n_slots:
@@ -356,6 +416,8 @@ def build(doc: dict, warnings: list | None = None,
                 plan_name, day_gid,
                 S.time_rule(wd, div, weeks_total), infos)
             plan_owner[pid] = cid
+
+        class_timelayouts[cid] = {g: tls[g] for g in sorted(my_tl_gids)}
 
     profile["ClassPlans"] = plans
     return profile

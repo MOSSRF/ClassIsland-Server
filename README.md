@@ -26,6 +26,7 @@ ClassIsland 的集控支持「无服务端模式」（`ServerKind: 0`）——�
 
 ## 特性
 
+- **每班独立作息与科目（1.2.0 新增）**：作息、科目也按班下发，可以给每个班单独配任课老师
 - **网页可视化编辑**：表格式课表（行=节次并显示真实时间，列=星期），下拉选科目；集控策略做成开关面板
 - **档案编辑全搬进网页**：作息表（增删节次/课间/分割线）、自定义科目、客户端默认设置、组织名、发布地址都能在界面上改，不用手写 YAML
 - **改作息自动同步课表**：增删「上课」节次时，用此作息的所有班级课表跟着补空位/删格子，不会卡在「节数不一致」的死胡同
@@ -91,6 +92,28 @@ python3 tools/preflight.py --dist dist --live ./live-repo   # 发布前安全检
 
 也可以用环境变量覆盖：`CISRV_LIVE_REPO`、`CISRV_BACKUP_DIR` 等。
 
+### 按班配任课老师（1.2.0）
+
+科目的老师名写在**班级内部**的 `subjects:` 里，只对本班生效：
+
+```yaml
+classes:
+  - id: "101"
+    name: 高一1班
+    timelayout: 标准作息
+    subjects:                      # 只影响本班
+      数学: { teacher: 张老师 }
+      语文: { teacher: 李老师 }
+    schedule:
+      mon: [语文, 数学, ...]
+```
+
+可用字段：`teacher` / `initial` / `outdoor`。写错字段名会直接报错，
+不会静默忽略（否则老师名没生效你也不知道）。
+
+顶层的 `subjects:` 仍然存在，但用途不同 —— 它是**声明官方 21 科之外的新科目**；
+班级内的 `subjects:` 是**覆盖已有科目在本班的属性**。
+
 ## 部署到 Gitee / GitHub
 
 1. 新建一个仓库存放**生成出来的配置**（跟本项目分开放）
@@ -103,6 +126,20 @@ python3 tools/preflight.py --dist dist --live ./live-repo   # 发布前安全检
 **为什么用 raw 而不是 Pages**：Gitee 免费版 Pages 每次更新都要手动点一次「部署」，没法自动化。raw 地址推送后即时生效（CDN 缓存约 60 秒）。
 
 客户端那边在「设置 → 集控」里填 `manifest.json` 的完整地址，班级标识填你在 YAML 里定的 `id`。
+
+生成出来的仓库长这样（1.2.0 起作息与科目也按班）：
+
+```
+manifest.json          集控入口（单份，URL 里的 {id} 由客户端自己替换）
+policy.json            集控策略（全校统一）
+101/classplans.json    课表
+101/timelayouts.json   作息（只含该班用到的）
+101/subjects.json      科目（含本班任课老师）
+102/...
+```
+
+每个班目录都是**自包含**的：课表里引用的作息与科目，一定在同目录下能找到。
+发布前的安全检查会逐班验证这一点。
 
 ### 批量装机：ManagementPreset.json
 
@@ -123,6 +160,12 @@ python3 tools/preflight.py --dist dist --live ./live-repo   # 发布前安全检
 - 改了内容必须让 `Version` 变大 —— 本项目用内容哈希自动处理
 - `Version` **不能回退**，写小了客户端就再也不更新了
 - 因此不需要「版本化文件名」那类绕缓存技巧，URL 保持稳定即可
+
+> ⚠️ **Version 是全局的，不是按班的。**
+> 客户端本地只存 `ClassPlanVersion` / `TimeLayoutVersion` / `SubjectsVersion`
+> 这几个**标量**。所以哪怕文件已按班拆开，只改一个班也会抬高全局
+> Version，导致**所有班**重新拉取自己那份。不会出错，但请求量会
+> 随班级数放大（详见 `docs/SCHEMA.md` §4.2.2）。
 
 ## 目录结构
 

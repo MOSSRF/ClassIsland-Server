@@ -104,12 +104,39 @@ def main() -> int:
     a = ap.parse_args()
 
     live = Path(a.live)
-    if not (live / "timelayouts.json").exists():
-        print(f"✗ {live} 不像线上副本（缺 timelayouts.json）", file=sys.stderr)
-        return 1
 
-    tls = load_jsonc(live / "timelayouts.json").get("TimeLayouts") or {}
-    subs = load_jsonc(live / "subjects.json").get("Subjects") or {}
+    # v1.2.0 起 timelayouts/subjects 按班下发（<id>/timelayouts.json）。
+    # 这里两种布局都要能读：先收根级共用文件，再把各班目录里的合并进来，
+    # 得到「全校作息/科目全集」。只读根级会漏掉按班文件里独有的条目，
+    # 导出的 yaml 就会缺作息 —— 再生成一次即静默悬空。
+    def merge_all(fname: str, key: str) -> dict:
+        acc: dict = {}
+        root = live / fname
+        if root.exists():
+            acc.update(load_jsonc(root).get(key) or {})
+        for sub in sorted(live.iterdir()):
+            if not sub.is_dir() or sub.name == ".git":
+                continue
+            f = sub / fname
+            if f.exists():
+                try:
+                    acc.update(load_jsonc(f).get(key) or {})
+                except Exception as e:
+                    print(f"  ⚠ {sub.name}/{fname} 解析失败: {e}")
+        return acc
+
+    tls = merge_all("timelayouts.json", "TimeLayouts")
+    subs = merge_all("subjects.json", "Subjects")
+    # 按班老师名的比较基线：只取根级共用文件（若还存在）。
+    # 不能拿 merge_all 的结果当基线 —— 它已经把各班的老师名合并进去了，
+    # 再拿它做 diff 会恒为空，于是老师名一个都导不出来（静默丢数据）。
+    _root_sf = live / "subjects.json"
+    base_subs = ((load_jsonc(_root_sf).get("Subjects") or {})
+                 if _root_sf.exists() else {})
+    if not tls:
+        print(f"✗ {live} 不像线上副本（找不到任何 timelayouts.json）",
+              file=sys.stderr)
+        return 1
     mf = load_jsonc(live / "manifest.json") if (live / "manifest.json").exists() else {}
 
     base = a.base_url
@@ -264,7 +291,39 @@ def main() -> int:
         weeks = max(totals) if totals else 2
 
         L.append(f"  - id: {q(cid)}")
-        L.append(f"    name: {q(cid)}")
+        # 班级显示名从课表名反推（课表名格式 "<班名> <星期>"）。
+        # 直接写 name: <id> 会把线上的 "<班名> 周三2" 刷成 "<id> 周三2" ——
+        # 内容没坏但显示名被静默改掉，round-trip 也不再等价。
+        _cand = {re.sub(r"\s*[周].*$", "", (v.get("Name") or "")).strip()
+                 for v in cps.values()}
+        _cand = {c for c in _cand if c}
+        _disp = _cand.pop() if len(_cand) == 1 else cid
+        L.append(f"    name: {q(_disp)}")
+
+        # 本班独有的科目属性（主要是任课老师）。
+        # 按班下发后，老师名存在 <id>/subjects.json 里；不导出的话
+        # round-trip 一次就会把全班老师名静默抹掉。
+        my_sf = live / cid / "subjects.json"
+        if my_sf.exists():
+            try:
+                my_subs = load_jsonc(my_sf).get("Subjects") or {}
+            except Exception:
+                my_subs = {}
+            ov_lines = []
+            for sid_, rec in sorted(my_subs.items(),
+                                    key=lambda x: x[1].get("Name") or ""):
+                nm = rec.get("Name") or ""
+                base_rec = base_subs.get(sid_) or {}
+                bits = []
+                tch = rec.get("TeacherName") or ""
+                # 只导出与全集基线不同的部分，避免把 21 科全刷一遍
+                if tch and tch != (base_rec.get("TeacherName") or ""):
+                    bits.append(f"teacher: {q(tch)}")
+                if bits and nm:
+                    ov_lines.append(f"      {q(nm)}: {{ {', '.join(bits)} }}")
+            if ov_lines:
+                L.append("    subjects:")
+                L.extend(ov_lines)
         if main_tl in tl_by_guid:
             L.append(f"    timelayout: {q(tl_by_guid[main_tl]['name'])}")
         else:

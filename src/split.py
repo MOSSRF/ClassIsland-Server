@@ -6,18 +6,32 @@ split.py — schedule.yaml → dist/ 集控静态文件树
 （以实际使用中的集控仓库为准）：
 
     dist/manifest.json          集控入口（单份，服务全部班级）
-    dist/timelayouts.json       共用·时间表
-    dist/subjects.json          共用·科目
-    dist/policy.json            共用·策略
+    dist/policy.json            共用·策略（全校统一的锁定规则，不按班分）
     dist/settings.json          共用·默认设置（仅当 yaml 配了 settings）
     dist/{id}/classplans.json   每班一份课表
+    dist/{id}/timelayouts.json  每班一份作息（只含该班引用到的）
+    dist/{id}/subjects.json     每班一份科目（可按班配任课老师）
     dist/ManagementPreset.json  客户端装机预设（不上传仓库，单独发给装机的人）
 
 为什么是单份 manifest：
   `ServerlessConnection::DecorateUrl` 的 IL 实测含两次 String::Replace，
   把 URL 模板里的 `{id}` 换成客户端自己的 ClassIdentity、`{cuid}` 换成客户端 ID。
-  所以 ClassPlanSource.Value 里**直接写字面量 `{id}`** 即可按班分流，
   十几个班共用一份 manifest，不必每班生成一个清单文件。
+
+🔴 每班独立作息/科目（IL 实测依据）
+  `DecorateUrl` 是无差别的字符串替换，**不限于 ClassPlanSource**；
+  且 `<MergeManagementProfileAsync>d__27` 的 IL 显示 ClassPlan / TimeLayout /
+  Subjects 三者走同一条 `GetJsonAsync` 下载路径。
+  ⇒ `{id}` 同样可用于 TimeLayoutSource / SubjectsSource，实现每班独立。
+
+  ⚠️ 代价：Version 是**全局**的（`ManagementVersions` 里 TimeLayoutVersion /
+     SubjectsVersion 各只有一个字段）。改任一个班都会抬高全局 Version，
+     导致**所有班**重新拉取自己那份。不会出错（各拉各的 URL），
+     但请知悉请求量会随班级数放大。
+
+  ⚠️ GUID 必须跨班一致，不按班派生。各班只加载自己那份文件，
+     GUID 重复不冲突；但若按班派生新 GUID，线上既有课表的
+     TimeLayoutId / SubjectId 会全部悬空 —— 静默损坏。
 
 🔴 Version 是客户端唯一的更新闸门
   `ReVersionString::IsNewerAndNotNull` 的 IL（25 字节，完整反汇编）：
@@ -35,7 +49,7 @@ Age 递增）。TTL 只有 60 秒，所以**不需要**版本化文件名来绕�
 保持 URL 稳定 + 只涨 Version 更简单，也更贴合官方设计。
 
 安全约定：只写 yaml 里声明的 id 目录，**绝不删除**仓库里已有的其他目录
-（线上还有 202506/202508/202509/202510/HELLO/TEST 等在用或留档的 id）。
+（线上可能还有其他在用或留档的 id，不在本次 yaml 里声明）。
 """
 from __future__ import annotations
 
@@ -138,7 +152,11 @@ def main() -> int:
         # plan_owner 由 build() 回填 {课表GUID: 班级id}，比按班名前缀
         # 匹配可靠（重名/含空格会串班，而串班是静默错输出）。
         plan_owner: dict[str, str] = {}
-        full = build_profile(doc, plan_owner=plan_owner)
+        class_subjects: dict[str, dict] = {}
+        class_timelayouts: dict[str, dict] = {}
+        full = build_profile(doc, plan_owner=plan_owner,
+                             class_subjects=class_subjects,
+                             class_timelayouts=class_timelayouts)
     except BuildError as e:
         print(f"✗ 构建失败: {e}", file=sys.stderr)
         return 1
@@ -157,14 +175,6 @@ def main() -> int:
         p.write_text(txt, encoding="utf-8")
         return v
 
-    tl = skel()
-    tl["TimeLayouts"] = full["TimeLayouts"]
-    v_tl = emit_shared("timelayout", "timelayouts.json", tl)
-
-    sb = skel()
-    sb["Subjects"] = full["Subjects"]
-    v_sub = emit_shared("subjects", "subjects.json", sb)
-
     policy = dict(DEFAULT_POLICY)
     policy.update(doc.get("policy") or {})
     unknown = set(policy) - set(DEFAULT_POLICY)
@@ -176,10 +186,12 @@ def main() -> int:
     settings = doc.get("settings") or {}
     v_set = emit_shared("settings", "settings.json", settings) if settings else 0
 
-    # ── 每班 classplans.json ───────────────────────────────────
-    # ClassPlanSource 在 manifest 里只有一个 Version，所以任一班级变动
-    # 都要抬高这个共同的 ClassPlanVersion（客户端各自重拉自己那份，代价很小）。
+    # ── 每班三份文件：classplans / timelayouts / subjects ────────
+    # 三个 Source 在 manifest 里各只有一个 Version，所以任一班级变动
+    # 都要抬高对应的全局 Version（客户端各自重拉自己那份）。
     per_class: dict[str, str] = {}
+    per_class_tl: dict[str, str] = {}
+    per_class_sub: dict[str, str] = {}
     reserved_ids: list[str] = []
     for c in classes_spec:
         cid = str(c["id"]).strip()
@@ -200,14 +212,55 @@ def main() -> int:
         cp["ClassPlans"] = mine
         per_class[cid] = json.dumps(cp, ensure_ascii=False, indent=2)
 
-    # 聚合哈希：任一班级内容变化 → ClassPlanVersion +1
-    agg = "\n".join(f"{k}\n{per_class[k]}" for k in sorted(per_class))
-    v_cp = vers.bump("classplan", agg)
+        # 本班作息：只含该班引用到的。缺失即悬空，宁可报错不可静默。
+        my_tl = class_timelayouts.get(cid)
+        if not my_tl:
+            print(f"✗ 班级 {cid!r} 没有对应的作息表", file=sys.stderr)
+            return 1
+        used_tl = {v.get("TimeLayoutId") for v in mine.values()}
+        missing = used_tl - set(my_tl)
+        if missing:
+            print(f"✗ 班级 {cid!r} 的课表引用了未下发的作息: "
+                  f"{sorted(missing)}", file=sys.stderr)
+            return 1
+        t = skel()
+        t["TimeLayouts"] = my_tl
+        per_class_tl[cid] = json.dumps(t, ensure_ascii=False, indent=2)
 
-    for cid, txt in per_class.items():
-        p = out / cid / "classplans.json"
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(txt, encoding="utf-8")
+        # 本班科目（含本班的任课老师覆盖）
+        my_sub = class_subjects.get(cid)
+        if not my_sub:
+            print(f"✗ 班级 {cid!r} 没有对应的科目表", file=sys.stderr)
+            return 1
+        used_sub = set()
+        for v in mine.values():
+            for ci in v.get("Classes") or []:
+                sid = ci.get("SubjectId")
+                if sid and sid != S.EMPTY_GUID:
+                    used_sub.add(sid)
+        missing_s = used_sub - set(my_sub)
+        if missing_s:
+            print(f"✗ 班级 {cid!r} 的课表引用了未下发的科目: "
+                  f"{sorted(missing_s)}", file=sys.stderr)
+            return 1
+        sdoc = skel()
+        sdoc["Subjects"] = my_sub
+        per_class_sub[cid] = json.dumps(sdoc, ensure_ascii=False, indent=2)
+
+    # 聚合哈希：任一班级内容变化 → 对应全局 Version +1
+    def agg_of(d: dict) -> str:
+        return "\n".join(f"{k}\n{d[k]}" for k in sorted(d))
+
+    v_cp = vers.bump("classplan", agg_of(per_class))
+    v_tl = vers.bump("timelayout", agg_of(per_class_tl))
+    v_sub = vers.bump("subjects", agg_of(per_class_sub))
+
+    for cid in per_class:
+        d = out / cid
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "classplans.json").write_text(per_class[cid], encoding="utf-8")
+        (d / "timelayouts.json").write_text(per_class_tl[cid], encoding="utf-8")
+        (d / "subjects.json").write_text(per_class_sub[cid], encoding="utf-8")
 
     # ── manifest.json（单份，{id} 由客户端替换） ────────────────
     manifest = {
@@ -215,8 +268,8 @@ def main() -> int:
         "OrganizationName": org,
         "CoreVersion": S.CORE_VERSION,         # 2.0.0.0（IL 实测，≠ 程序集 2.1.0.1）
         "ClassPlanSource": S.re_version(f"{base}/{{id}}/classplans.json", v_cp),
-        "TimeLayoutSource": S.re_version(f"{base}/timelayouts.json", v_tl),
-        "SubjectsSource": S.re_version(f"{base}/subjects.json", v_sub),
+        "TimeLayoutSource": S.re_version(f"{base}/{{id}}/timelayouts.json", v_tl),
+        "SubjectsSource": S.re_version(f"{base}/{{id}}/subjects.json", v_sub),
         "PolicySource": S.re_version(f"{base}/policy.json", v_pol),
     }
     if settings:

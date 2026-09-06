@@ -144,23 +144,12 @@ def main() -> int:
     problems: list[str] = []
     warnings: list[str] = []
 
-    # ── 将要发布的共用资源 ──────────────────────────────────────
-    new_tl = set(json.loads((dist / "timelayouts.json").read_text("utf-8"))["TimeLayouts"])
-    new_sub = set(json.loads((dist / "subjects.json").read_text("utf-8"))["Subjects"])
-
-    live_plans = collect_plans(live)
-    dist_plans = collect_plans(dist)
-
-    # ── 1. 悬空引用检查（最致命） ───────────────────────────────
-    # 关键：必须区分「本次发布造成的损坏」与「线上早已存在的损坏」。
-    # 实例：线上 HELLO/TEST 引用的时间表已不在 timelayouts.json 里，
-    # 用线上自己的文件校验就已经悬空。若不区分，这两个历史垃圾目录
-    # 会永久阻止任何发布 —— 预检就从安全网退化成死锁。
-    print("── 悬空引用检查 ──")
+    # ── 每班资源（v1.2.0 起 timelayouts/subjects 也按班下发） ────
+    # manifest 里 TimeLayoutSource/SubjectsSource 现在带 {id}，
+    # 所以每个班解析引用时只看自己目录下那两份文件。
     EMPTY = "00000000-0000-0000-0000-000000000000"
 
-    def live_shared(fname: str, key: str) -> set:
-        f = live / fname
+    def read_set(f: Path, key: str) -> set:
         if not f.exists():
             return set()
         try:
@@ -168,8 +157,29 @@ def main() -> int:
         except Exception:
             return set()
 
-    old_tl = live_shared("timelayouts.json", "TimeLayouts")
-    old_sub = live_shared("subjects.json", "Subjects")
+    live_plans = collect_plans(live)
+    dist_plans = collect_plans(dist)
+
+    # 发布后每个 id 实际能解析到的资源集合。
+    # 本次发布的班级 → 用新的每班文件；
+    # 线上独有的班级 → 它们的 URL 也会变成 {id}/...，若该目录下没有这两份
+    # 文件，发布后就会解析失败。这是 URL 结构变更特有的新风险，必须检出。
+    def resolved(cid: str) -> tuple[set, set, bool]:
+        d_tl = dist / cid / "timelayouts.json"
+        d_sb = dist / cid / "subjects.json"
+        if d_tl.exists() or d_sb.exists():
+            return read_set(d_tl, "TimeLayouts"), read_set(d_sb, "Subjects"), True
+        l_tl = live / cid / "timelayouts.json"
+        l_sb = live / cid / "subjects.json"
+        if l_tl.exists() or l_sb.exists():
+            return read_set(l_tl, "TimeLayouts"), read_set(l_sb, "Subjects"), True
+        return set(), set(), False        # 按班文件缺失 → 发布后取不到
+
+    # 线上旧的根级共用文件（用于判断「本来就坏」）
+    old_tl = read_set(live / "timelayouts.json", "TimeLayouts")
+    old_sub = read_set(live / "subjects.json", "Subjects")
+
+    print("── 悬空引用检查 ──")
 
     def dangling(cps: dict, tl_set: set, sub_set: set):
         bad_tl = {v.get("TimeLayoutId") for v in cps.values()} - tl_set
@@ -185,11 +195,31 @@ def main() -> int:
         for cid, cps in plans.items():
             if scope == "线上" and cid in dist_plans:
                 continue          # 本次会整份替换，不算受害者
-            bad_tl, bad_sub = dangling(cps, new_tl, new_sub)
-            if not (bad_tl or bad_sub):
-                print(f"  ✓ {scope} id={cid!r} 引用完整")
+            tl_set, sub_set, have = resolved(cid)
+            if not have:
+                # 该 id 没有按班的 timelayouts/subjects：URL 带 {id} 后必然 404
+                was_tl, was_sub = dangling(cps, old_tl, old_sub)
+                # 已经坏掉的 id 不算「本次新引入」：
+                #   · 引用了不存在的作息/科目 → 今天就取不到
+                #   · 一个课表都没有         → 今天就是空白屏
+                # 把这类历史垃圾判成阻断，预检就从安全网退化成死锁
+                # （谁也没法发布，除非先去线上手工清理）。
+                broken_before = bool(was_tl or was_sub) or not cps
+                desc = (f"{scope} id={cid!r}（{len(cps)} 个课表）"
+                        f"缺少 {cid}/timelayouts.json 与 {cid}/subjects.json")
+                if broken_before:
+                    warnings.append(desc + "（该 id 线上原本就已损坏）")
+                    print(f"  ⚠ {desc}  ← 线上原本就坏")
+                else:
+                    problems.append(
+                        desc + "；manifest 的 TimeLayoutSource/SubjectsSource "
+                        "已带 {id}，发布后该班将取不到作息与科目")
+                    print(f"  ✗ {desc}  ← 发布后会取不到！")
                 continue
-            # 用线上现状再算一次：现在就已同样悬空 → 不是本次的锅
+            bad_tl, bad_sub = dangling(cps, tl_set, sub_set)
+            if not (bad_tl or bad_sub):
+                print(f"  ✓ {scope} id={cid!r} 引用完整（按班自包含）")
+                continue
             was_tl, was_sub = dangling(cps, old_tl, old_sub)
             pre_existing = bad_tl <= was_tl and bad_sub <= was_sub
             desc = (f"{scope} id={cid!r}（{len(cps)} 个课表）"

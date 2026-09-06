@@ -387,6 +387,23 @@ def dump_classes(classes: list[dict]) -> str:
         weeks = int(c.get("weeks", 2))
         if weeks != 2:
             L.append(f"    weeks: {weeks}")
+        # 本班任课老师等覆盖。必须原样写回：漏掉它，从网页保存一次
+        # 就会把全班老师名静默抹掉（内容看着还在，老师全没了）。
+        my_subs = c.get("subjects") or {}
+        if my_subs:
+            L.append("    subjects:")
+            for nm in sorted(my_subs):
+                meta = my_subs[nm] or {}
+                bits = []
+                if meta.get("teacher"):
+                    bits.append(f'teacher: {_q(str(meta["teacher"]))}')
+                if meta.get("initial"):
+                    bits.append(f'initial: {_q(str(meta["initial"]))}')
+                if "outdoor" in meta:
+                    bits.append(
+                        f'outdoor: {"true" if meta["outdoor"] else "false"}')
+                if bits:
+                    L.append(f"      {_q(nm)}: {{ {', '.join(bits)} }}")
         sched = c.get("schedule") or {}
         if sched:
             L.append("    schedule:")

@@ -272,6 +272,60 @@ ClassPlan / TimeLayout / Subjects / Components 每一项都先过 `IsNewerAndNot
 ⇒ **`{id}` 可直接写在 `ClassPlanSource.Value` 里**，客户端按自身 `ClassIdentity` 替换。
 一份 manifest 即可服务全部班级，无需每班一个 manifest 文件。
 
+#### 4.2.1 `{id}` 适用于**全部** source，不只 ClassPlanSource（IL 实测）
+
+`DecorateUrl` 对传入的 URL 做**无差别**字符串替换，它不关心这个 URL 来自哪个 source：
+
+```
+// ServerlessConnection::DecorateUrl（85 字节，完整反汇编）
+ldarg.1 | ldstr "{cuid}" | ldarg.0 | call get_ClientGuid
+        | callvirt Object::ToString | callvirt String::Replace
+        | ldstr "{id}"   | ldarg.0 | call get_Id
+        | callvirt String::Replace
+        | … LogTrace … | newobj Uri::.ctor | ret
+```
+
+而 `<MergeManagementProfileAsync>d__27` 的 IL 显示 ClassPlan / TimeLayout /
+Subjects **三者走同一条 `GetJsonAsync` 下载路径**（各自先过
+`IsNewerAndNotNull`，通过后 `get_Value` → 下载）。
+
+⇒ **结论：`{id}` 同样可用于 `TimeLayoutSource` / `SubjectsSource`**，
+从而实现「每班独立作息与科目」（本工具 v1.2.0 已采用）：
+
+```
+{base}/{id}/classplans.json
+{base}/{id}/timelayouts.json
+{base}/{id}/subjects.json
+{base}/policy.json            ← 策略仍全校统一，不分班
+```
+
+典型用途：科目的 `TeacherName` 绑定到班。旧的全校共用 `subjects.json`
+做不到这一点 —— 填了「数学=张三」会让**所有班**的数学都显示张三。
+
+> ⚠️ **GUID 必须跨班保持一致，不得按班派生。**
+> 各班只加载自己那份文件，同一 GUID 出现在多个班不会冲突；
+> 但若按班重新派生 GUID，线上既有 `classplans.json` 里的
+> `TimeLayoutId` / `SubjectId` 会全部悬空 —— 客户端拉到课表却找不到
+> 作息与科目，且**不报错**。
+
+#### 4.2.2 🔴 Version 是**全局**的，不能按班递增
+
+本地版本存在 `ManagementVersions`，它只有七个**标量**字段：
+
+```
+ClassPlanVersion / TimeLayoutVersion / SubjectsVersion /
+DefaultSettingsVersion / PolicyVersion / CredentialVersion / ComponentsVersion
+```
+
+没有「每班一个版本号」这回事。所以即使文件按班拆开：
+
+- 只改 6 班的老师名 → `SubjectsVersion` 必须 +1
+- 但这个 +1 是**全校的** → 所有班都判定「有更新」，各自重拉自己那份
+
+不会出错（各拉各的 URL），但**请求量 ≈ 班级数 × 3 个文件**。
+配合 4.3 的 60 秒 CDN TTL，日常改课表频率下可接受；
+但不要把它当成「改一个班只影响一个班」来用。
+
 ### 4.3 Gitee raw 缓存 TTL（实测）
 
 ```

@@ -174,6 +174,9 @@ def read_state(fname: str) -> dict:
             "timelayout": c.get("timelayout") or "",
             "weeks": int(c.get("weeks", 2)),
             "reserved": bool(c.get("reserved", False)),
+            # 本班任课老师覆盖：必须带进前端状态并原样回写，
+            # 否则保存一次就静默丢失（见 yaml_edit.dump_classes 注释）
+            "subjects": c.get("subjects") or {},
             "schedule": c.get("schedule") or {},
         })
 
