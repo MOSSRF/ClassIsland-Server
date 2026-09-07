@@ -21,6 +21,8 @@ webui.py — 课表可视化编辑界面（单文件 HTTP 服务，零前端构�
 from __future__ import annotations
 
 import argparse
+import base64
+import hmac
 import json
 import os
 import subprocess
@@ -361,6 +363,35 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, fmt, *a):     # 静音访问日志
         pass
 
+    # ── 可选 Basic Auth ────────────────────────────────────────────
+    # 设了 CISRV_WEBUI_AUTH=user:pass 才启用；不设 = 原有行为不变。
+    #
+    # 这不是给公网用的正经方案（HTTP Basic 明文、无防爆破、无审计），
+    # 只是在「已暴露但正式鉴权还没到位」的窗口期挡住随手扫到的人。
+    # 正式方案是反代层鉴权（如 Cloudflare Access），到位后请撤掉本层。
+    def _auth_ok(self) -> bool:
+        want = os.environ.get("CISRV_WEBUI_AUTH", "")
+        if not want:
+            return True                     # 未配置 = 不启用
+        got = self.headers.get("Authorization", "")
+        if not got.startswith("Basic "):
+            return False
+        try:
+            raw = base64.b64decode(got[6:]).decode("utf-8", "replace")
+        except Exception:
+            return False
+        # 定时比较，避免按字节泄漏
+        return hmac.compare_digest(raw, want)
+
+    def _need_auth(self):
+        body = b"401 Unauthorized"
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="ClassIsland"')
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _send(self, code: int, body: bytes, ctype: str):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -374,6 +405,8 @@ class H(BaseHTTPRequestHandler):
                    "application/json; charset=utf-8")
 
     def do_GET(self):
+        if not self._auth_ok():
+            return self._need_auth()
         path = urlparse(self.path).path
         try:
             if path in ("/", "/index.html"):
@@ -419,6 +452,8 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
+        if not self._auth_ok():
+            return self._need_auth()
         path = urlparse(self.path).path
         try:
             n = int(self.headers.get("Content-Length") or 0)
