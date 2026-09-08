@@ -376,12 +376,17 @@ class H(BaseHTTPRequestHandler):
         got = self.headers.get("Authorization", "")
         if not got.startswith("Basic "):
             return False
+        # 全程用 bytes 比较。
+        # 曾经这里 decode("utf-8", "replace") 成 str 再比，非法字节会变成
+        # U+FFFD，而 hmac.compare_digest 对 str 只接受纯 ASCII，于是任何
+        # 带非 ASCII 字节的凭据都会抛 TypeError 炸穿 handler，连接被掐断，
+        # 反代看到 EOF 回 502 —— 等于给了个无凭据的拒绝服务开关。
         try:
-            raw = base64.b64decode(got[6:]).decode("utf-8", "replace")
+            raw = base64.b64decode(got[6:], validate=False)
         except Exception:
             return False
         # 定时比较，避免按字节泄漏
-        return hmac.compare_digest(raw, want)
+        return hmac.compare_digest(raw, want.encode("utf-8"))
 
     def _need_auth(self):
         body = b"401 Unauthorized"
@@ -405,8 +410,14 @@ class H(BaseHTTPRequestHandler):
                    "application/json; charset=utf-8")
 
     def do_GET(self):
-        if not self._auth_ok():
-            return self._need_auth()
+        # 鉴权必须包在 try 内。它曾经在 try 外面，于是 _auth_ok 一抛异常
+        # 就炸穿 handler、连接被掐断，反代回 502。
+        try:
+            if not self._auth_ok():
+                return self._need_auth()
+        except Exception:
+            traceback.print_exc()
+            return self._need_auth()        # 鉴权出错 → 当作未通过，不是 502
         path = urlparse(self.path).path
         try:
             if path in ("/", "/index.html"):
@@ -452,7 +463,11 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if not self._auth_ok():
+        try:
+            if not self._auth_ok():
+                return self._need_auth()
+        except Exception:
+            traceback.print_exc()
             return self._need_auth()
         path = urlparse(self.path).path
         try:
