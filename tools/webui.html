@@ -6,9 +6,18 @@
 <title>课表集控编辑</title>
 <style>
 :root{
+  color-scheme:dark;              /* 让原生 select 弹出层/滚动条跟随深色 */
   --bg:#0f1216; --panel:#171b21; --panel2:#1e232b; --line:#2a313b;
   --fg:#e6e9ee; --dim:#8b95a3; --accent:#4a9eff; --ok:#3fb950;
   --warn:#d29922; --bad:#f85149;
+  /* 语义化颜色：以下在浅色模式会被整套换掉，禁止再写死色值 */
+  --mark-bg:#12161b;              /* 课表网格「无此节次」格 */
+  --cell-in:#12161b;              /* 作息/科目表内嵌输入框底 */
+  --empty-bg:rgba(255,255,255,.04); /* 未排课空格 */
+  --slider-off:#39404b;           /* 开关未激活轨道 */
+  --log-bg:#0a0d11;               /* 输出日志底 */
+  --warnbox-bg:#2a1f0a; --warnbox-fg:#f0d48a;
+  --shadow:rgba(0,0,0,.55);
 }
 *{box-sizing:border-box}
 body{margin:0;font:14px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
@@ -51,7 +60,9 @@ td select{width:100%;height:100%;min-height:32px;background:transparent;color:va
 td select:hover{background:var(--panel2)}
 td select:focus{outline:2px solid var(--accent);outline-offset:-2px}
 tr.divider td,tr.divider th{border-bottom:2px solid var(--accent)}
-.mark{background:#12161b;color:var(--warn);font-size:11px;padding:3px 10px;text-align:left}
+td.empty{background:var(--empty-bg)}
+td.nodata{background:var(--mark-bg)}
+.mark{background:var(--mark-bg);color:var(--warn);font-size:11px;padding:3px 10px;text-align:left}
 .row2{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 label.f{display:flex;gap:6px;align-items:center;color:var(--dim);font-size:12px}
 input[type=text],input[type=time],select.inp,textarea{background:var(--panel2);color:var(--fg);
@@ -60,7 +71,7 @@ input[type=text],input[type=time],select.inp,textarea{background:var(--panel2);c
 input[readonly]{opacity:.6;cursor:not-allowed}
 table.edit td{padding:3px 5px}
 table.edit td input[type=text],table.edit td input[type=time],
-table.edit td select.inp{width:100%;background:#12161b}
+table.edit td select.inp{width:100%;background:var(--cell-in)}
 table.edit td.ctl{white-space:nowrap;width:1%}
 .sw{display:flex;justify-content:space-between;align-items:center;gap:10px;
     padding:8px 10px;background:var(--panel2);border:1px solid var(--line);
@@ -68,30 +79,80 @@ table.edit td.ctl{white-space:nowrap;width:1%}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px}
 .toggle{position:relative;width:40px;height:22px;flex:none}
 .toggle input{opacity:0;width:0;height:0}
-.slider{position:absolute;inset:0;background:#39404b;border-radius:22px;transition:.15s}
+.slider{position:absolute;inset:0;background:var(--slider-off);border-radius:22px;transition:.15s}
 .slider:before{content:"";position:absolute;height:16px;width:16px;left:3px;top:3px;
   background:#fff;border-radius:50%;transition:.15s}
 input:checked+.slider{background:var(--accent)}
 input:checked+.slider:before{transform:translateX(18px)}
-.wk{display:flex;gap:5px;margin-bottom:10px}
+.wk{display:flex;gap:5px;margin-bottom:10px;align-items:center}
 .wk .tab{padding:5px 12px;font-size:12px}
+.addtab{border-style:dashed;color:var(--dim)}
+.inh{font-size:10px;color:var(--warn);font-weight:400;margin-top:2px}
+.colact{padding:0 5px;margin:2px 0 0 4px;font-size:11px;line-height:1.5}
+.colsel{font-size:10px;margin-top:3px;max-width:110px;padding:1px 2px;
+  background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:4px}
 #log{white-space:pre-wrap;font:12px/1.55 ui-monospace,Menlo,Consolas,monospace;
-     background:#0a0d11;border:1px solid var(--line);border-radius:8px;
+     background:var(--log-bg);border:1px solid var(--line);border-radius:8px;
      padding:12px;max-height:340px;overflow:auto;margin-top:10px}
 .toast{position:fixed;right:16px;bottom:16px;z-index:99;background:var(--panel2);
   border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;
-  padding:11px 15px;max-width:420px;box-shadow:0 8px 28px #0009;font-size:13px;
+  padding:11px 15px;max-width:420px;box-shadow:0 8px 28px var(--shadow);font-size:13px;
   white-space:pre-wrap}
 .toast.ok{border-left-color:var(--ok)} .toast.bad{border-left-color:var(--bad)}
 .toast.warn{border-left-color:var(--warn)}
 .hint{color:var(--dim);font-size:12px;margin-top:8px}
 .hint code{background:var(--panel2);padding:1px 4px;border-radius:3px}
-.warnbox{background:#2a1f0a;border:1px solid var(--warn);color:#f0d48a;
+.warnbox{background:var(--warnbox-bg);border:1px solid var(--warn);color:var(--warnbox-fg);
   border-radius:7px;padding:9px 12px;font-size:12px;margin-bottom:10px}
 .dirty{color:var(--warn)}
 .pill{font-size:11px;color:var(--dim);background:var(--panel2);border:1px solid var(--line);
   border-radius:20px;padding:2px 9px;margin:0 4px 4px 0;display:inline-block}
 .mono{font:11px ui-monospace,Menlo,Consolas,monospace;color:var(--dim)}
+
+/* ── 首次使用向导（模态） ── */
+.modal{position:fixed;inset:0;z-index:100;display:none;
+  background:rgba(0,0,0,.55);align-items:flex-start;justify-content:center;
+  padding:40px 16px;overflow:auto}
+.modal.show{display:flex}
+.modal .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  width:min(680px,100%);box-shadow:0 20px 60px var(--shadow);overflow:hidden}
+.modal h3{margin:0;padding:16px 20px;border-bottom:1px solid var(--line);font-size:15px}
+.modal .body{padding:18px 20px;max-height:64vh;overflow:auto}
+.modal .foot{padding:13px 20px;border-top:1px solid var(--line);
+  display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.steps{list-style:none;margin:0 0 14px;padding:0;counter-reset:s}
+.steps li{counter-increment:s;position:relative;padding:7px 0 7px 34px;color:var(--dim);font-size:13px}
+.steps li::before{content:counter(s);position:absolute;left:0;top:6px;width:22px;height:22px;
+  border-radius:50%;background:var(--panel2);border:1px solid var(--line);
+  color:var(--fg);font-size:12px;display:flex;align-items:center;justify-content:center}
+.steps li b{color:var(--fg)}
+.gfield{margin:12px 0}
+.gfield label{display:block;font-size:12px;color:var(--dim);margin-bottom:5px}
+.gfield input{width:100%;padding:8px 10px}
+.gstatus{font:12px/1.6 ui-monospace,Menlo,Consolas,monospace;background:var(--log-bg);
+  border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px;
+  white-space:pre-wrap;word-break:break-all}
+.gstatus.ok{border-color:var(--ok)}
+.gstatus.bad{border-color:var(--bad)}
+.pill-status{font-size:11px;padding:2px 9px;border-radius:20px;border:1px solid var(--line)}
+.pill-status.ok{color:var(--ok);border-color:var(--ok)}
+.pill-status.no{color:var(--warn);border-color:var(--warn)}
+button.guide{border-color:var(--accent);color:var(--accent)}
+
+/* ── 跟随系统浅色模式（必须放在样式表末尾：同特异性下后定义生效） ── */
+@media (prefers-color-scheme:light){
+  :root{
+    color-scheme:light;
+    --bg:#f4f6f9; --panel:#ffffff; --panel2:#eef1f5; --line:#d9dee6;
+    --fg:#1a1d23; --dim:#66707d; --accent:#2f80ed; --ok:#2da44e;
+    --warn:#9a6700; --bad:#d1242f;
+    --mark-bg:#e8ebf0; --cell-in:#eef1f5; --empty-bg:rgba(20,35,60,.05);
+    --slider-off:#c6ccd7;
+    --log-bg:#f1f3f6;
+    --warnbox-bg:#fdf3db; --warnbox-fg:#7a5200;
+    --shadow:rgba(20,30,50,.16);
+  }
+}
 </style>
 </head>
 <body>
@@ -100,6 +161,7 @@ input:checked+.slider:before{transform:translateX(18px)}
   <span class="school" id="school"></span>
   <span class="spacer"></span>
   <span id="dirty" class="dirty"></span>
+  <button id="bGuide" class="guide">首次使用向导</button>
   <button id="bSave" class="primary">保存</button>
   <button id="bBuild">构建校验</button>
   <button id="bPre">预检</button>
@@ -121,14 +183,20 @@ input:checked+.slider:before{transform:translateX(18px)}
         <label class="f">默认作息 <select class="inp" id="fTl"></select></label>
         <label class="f">轮换周数 <input type="text" id="fWeeks" size="3"></label>
       </div>
-      <div class="hint">id 只读：它就是线上目录名，也是客户端 <code>{id}</code> 的替换值，改了大屏立刻拉不到课表。</div>
+      <div class="row2" style="margin-top:8px">
+        <button class="sm danger" id="clsDel">删除此班级</button>
+      </div>
+      <div class="hint">id 只读：它就是线上目录名，也是客户端 <code>{id}</code> 的替换值，改了大屏立刻拉不到课表。<br>
+      新班级先建成<b>预留班级</b>（只占 id、不下发空课表），选好默认作息后点「转为正式班级」再排课。</div>
     </div>
 
     <div class="card">
       <h2>课表</h2>
       <div class="wk" id="wkTabs"></div>
+      <div class="wk" id="dayAdd"></div>
       <div style="overflow:auto"><table id="grid"></table></div>
-      <div class="hint">行 = 上课节次（左侧为该节真实起止时间）；蓝线 = 作息里的分割线；留空 = 无课。周五等使用不同作息的日子会单独按其作息渲染。</div>
+      <div class="hint">行 = 上课节次（左侧为该节真实起止时间）；蓝线 = 作息里的分割线；留空 = 无课。周五等使用不同作息的日子会单独按其作息渲染。<br>
+      <b>周轮换：</b>切到「第 N 周」后编辑某天，会自动把那天从「每周相同」复制一份拆成 <code>day@N</code>（未拆分的天仍跟随每周相同）；列头的 <b>↺</b> 可删掉该周特殊安排、合并回去。</div>
     </div>
   </div>
 
@@ -248,6 +316,43 @@ input:checked+.slider:before{transform:translateX(18px)}
   </div>
 </main>
 
+<!-- ══ 首次使用向导 ══════════════════════════════════════ -->
+<div class="modal" id="guide">
+  <div class="box">
+    <h3>首次使用向导 · 连接你自己的集控仓库</h3>
+    <div class="body">
+      <ol class="steps">
+        <li>在 Gitee / GitHub 新建一个<b>公开</b>的空仓库，用来存放生成出来的配置（与本程序分开放）。</li>
+        <li>把仓库地址粘到下面，向导会自动 <b>clone</b>、识别默认分支并算出客户端访问的 <b>raw 地址</b>。</li>
+        <li>确认后发布地址会写进课表；之后在网页改课表点「发布到线上」即可。</li>
+        <li>客户端通过下载的 <b>ManagementPreset.json</b> 一键入控（在「基本信息」页）。</li>
+      </ol>
+      <div class="warnbox">
+        仓库必须<b>公开</b>：ClassIsland 客户端不带任何凭据去拉这些 JSON，私有仓库大屏会拉不到。
+        首次 clone 若需要登录，请用带令牌的 HTTPS 地址，或先在本机配好 git 凭据。
+      </div>
+      <div class="gfield">
+        <label>当前状态</label>
+        <div id="gStatus" class="gstatus">检查中…</div>
+      </div>
+      <div class="gfield">
+        <label>你的仓库地址（网页地址 / HTTPS / SSH 均可）</label>
+        <input type="text" id="gUrl" placeholder="https://gitee.com/你的用户名/classisland-mgmt">
+      </div>
+      <div class="gfield">
+        <label>向导检测结果</label>
+        <div id="gResult" class="gstatus" hidden></div>
+      </div>
+    </div>
+    <div class="foot">
+      <span class="spacer" style="flex:1"></span>
+      <button id="gCancel">关闭</button>
+      <button id="gConnect" class="primary">连接仓库</button>
+      <button id="gApply" hidden class="primary">确认并写入发布地址</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let ST=null, cur=0, curWeek=1, curTl=null, pane='pClass';
 // 改过的段集合。只把真的改过的段回传给后端：每重写一段都会丢掉该段内
@@ -310,6 +415,12 @@ function parseDay(k){
 }
 function dayKey(day,div){ return div?`${day}@${div}`:day; }
 
+// 班级初始周视图：有分周安排从第 1 周进，否则停在「每周相同」
+function classStartWeek(c){
+  return Object.keys(c.schedule||{}).some(
+    k=>{const p=parseDay(k);return p&&p.div>0;})?1:0;
+}
+
 // 取某天的课程数组与所用作息（dict 形式可覆盖作息）
 function getDay(cls,key){
   const s=cls.schedule[key];
@@ -345,34 +456,120 @@ function renderTabs(){
   ST.classes.forEach((c,i)=>{
     const d=el('div',{className:'tab'+(i===cur?' on':'')+(c.reserved?' res':''),
       textContent:c.name+(c.reserved?'（预留）':'')});
-    d.onclick=()=>{cur=i;render()};
+    d.onclick=()=>{cur=i;curWeek=classStartWeek(c);render()};
     t.appendChild(d);
   });
+  const add=el('div',{className:'tab addtab',textContent:'+ 新增班级'});
+  add.onclick=addClass;
+  t.appendChild(add);
+}
+
+// 新增班级：id 就是线上目录名，一旦发布就不能再改，所以必须当场想清楚。
+// 建成预留班（reserved:true）：split 不会给它生成文件，绝不会把大屏刷白；
+// 用户在卡片里选好默认作息、点「转为正式班级」后才开始排课。
+function addClass(){
+  const id=(prompt('新班级 id（= 线上目录名 / 大屏 ClassIdentity，发布后不可改）')||'').trim();
+  if(!id) return;
+  if(/[\/"]|^\.|\s/.test(id)){
+    toast('id 不能含 /、空格、引号或以 . 开头','bad'); return;
+  }
+  if(ST.classes.some(c=>c.id===id)){
+    toast('id 已存在：'+id,'bad'); return;
+  }
+  const name=(prompt('班级显示名称（可以后再改）',id)||id).trim()||id;
+  ST.classes.push({id,name,timelayout:'',weeks:2,
+    reserved:true,subjects:{},schedule:{}});
+  cur=ST.classes.length-1; curWeek=1;
+  mark('classes'); render();
+  toast('已添加预留班级「'+name+'」，选默认作息后点「转为正式班级」','ok');
+}
+
+function delClass(){
+  const c=ST.classes[cur];
+  if(!c) return;
+  if(!confirm('确定从 schedule.yaml 删除班级「'+(c.name||c.id)+'」（id '+c.id+'）？\n\n'
+    +'注意：这只会让流水线不再生成它的课表，线上仓库里已有的 '+c.id+'/ 目录不会被自动删除。\n'
+    +'发布后需另行运行 prune_ids.py --apply 才会清理线上目录。')) return;
+  ST.classes.splice(cur,1);
+  cur=Math.max(0,Math.min(cur,ST.classes.length-1));
+  curWeek=1;
+  mark('classes');
+  render();
+  toast('已删除（尚未保存）','warn');
 }
 
 function renderWeekTabs(cls){
-  const divs=new Set();
-  Object.keys(cls.schedule).forEach(k=>{const p=parseDay(k); if(p) divs.add(p.div)});
   const w=$('#wkTabs'); w.innerHTML='';
-  const list=[...divs].sort();
-  if(list.length===1&&list[0]===0) return;      // 无轮换，不显示切换
-  list.filter(d=>d>0).forEach(d=>{
+  // 只要 weeks>=2 就把 1..N 周页签都亮出来：周轮换是从「切到第 N 周 → 编辑
+  // 某天」这个动作开始的，只按已有 @键 反推的话，永远没地方开始。
+  const weeks=Math.max(2,parseInt(cls.weeks)||2);
+  const hasPlain=Object.keys(cls.schedule).some(
+    k=>{const p=parseDay(k);return p&&p.div===0;});
+  for(let d=1;d<=weeks;d++){
     const b=el('div',{className:'tab'+(d===curWeek?' on':''),textContent:'第'+d+'周'});
     b.onclick=()=>{curWeek=d;render()};
     w.appendChild(b);
-  });
-  if(divs.has(0)){
+  }
+  // 「每周相同」只在确实存在普通天（或正停在该视图）时出现：
+  // 同一天只能是「每周相同」或「@1..@N」之一，混用会在同一周叠加两份课表。
+  if(hasPlain||curWeek===0){
     const b=el('div',{className:'tab'+(curWeek===0?' on':''),textContent:'每周相同'});
     b.onclick=()=>{curWeek=0;render()};
     w.appendChild(b);
   }
+  if(curWeek>weeks) curWeek=weeks;
+}
+
+// 某天存在哪些周变体（@1..@N）
+function weekVariants(cls,day){
+  const out=[];
+  Object.keys(cls.schedule).forEach(k=>{
+    const p=parseDay(k);
+    if(p&&p.day===day&&p.div>0) out.push(p.div);
+  });
+  return out.sort();
+}
+
+// 把「每周相同」的一天拆成 @1..@N（内容原样复制），再删掉普通键。
+// 必须整套拆：同一天若同时存在 mon 和 mon@2，客户端那一周会叠加两份课表。
+function splitDay(cls,day){
+  const g=getDay(cls,day);
+  const weeks=Math.max(2,parseInt(cls.weeks)||2);
+  for(let n=1;n<=weeks;n++){
+    cls.schedule[dayKey(day,n)]=g.dict
+      ?{timelayout:g.tl,classes:g.list.slice()}
+      :g.list.slice();
+  }
+  delete cls.schedule[day];
+}
+
+// 反向：把 @1..@N 合并回普通键（内容取指定周）
+function mergeDay(cls,day,fromDiv){
+  const src=dayKey(day,fromDiv);
+  const g=getDay(cls,src);
+  cls.schedule[day]=g.dict
+    ?{timelayout:g.tl,classes:g.list.slice()}
+    :g.list.slice();
+  weekVariants(cls,day).forEach(n=>{delete cls.schedule[dayKey(day,n)];});
 }
 
 function render(){
-  const cls=ST.classes[cur];
   $('#school').textContent=(ST.organization||ST.school)+' · '+ST.base_url
     +(ST.backupEnabled?'':' · 备份已关闭');
   renderTabs();
+
+  const card=$('#cCls');
+  if(!ST.classes.length){
+    // 一个班都没有（全删了）：课表卡与课表网格置空，只留新增入口
+    card.style.display='none';
+    $('#grid').innerHTML='';
+    $('#wkTabs').innerHTML='';
+    $('#dayAdd').innerHTML='';
+    renderPolicy(); renderSite(); renderNav();
+    return;
+  }
+  card.style.display='';
+  const cls=ST.classes[cur];
 
   $('#fId').value=cls.id;
   $('#fName').value=cls.name;
@@ -402,23 +599,57 @@ function renderGrid(cls){
       b.onclick=()=>{
         cls.reserved=false;
         cls.timelayout=cls.timelayout||Object.keys(ST.rawLayouts)[0];
-        cls.schedule={}; mark('classes'); render();
+        cls.schedule={}; curWeek=0; mark('classes'); render();
       };
       $('#cCls').appendChild(b);
     }
     return;
   }
   const ab=$('#bAct'); if(ab) ab.remove();
+  const da=$('#dayAdd'); da.innerHTML='';
 
+  // 解析本周视图该显示哪些天：
+  //  · curWeek===0（每周相同视图）：只看普通键 day
+  //  · curWeek===N：优先 day@N；没有就回退普通键 day（mode=inherited：
+  //    它在第 N 周生效，编辑它会先拆分成 @1..@N 再改第 N 周）
   const cols=[];
+  const missing=[];
   ST.dayOrder.forEach(d=>{
-    let key=null;
-    if(cls.schedule[dayKey(d,curWeek)]!=null) key=dayKey(d,curWeek);
-    else if(cls.schedule[d]!=null) key=d;
-    if(key) cols.push({day:d,key});
+    if(curWeek>=1){
+      const k=dayKey(d,curWeek);
+      if(cls.schedule[k]!=null){cols.push({day:d,key:k,mode:'div'});return;}
+      if(cls.schedule[d]!=null){cols.push({day:d,key:d,mode:'inherited'});return;}
+      missing.push(d);                       // 第 N 周无安排（可能别周有）
+    }else{
+      if(cls.schedule[d]!=null) cols.push({day:d,key:d,mode:'plain'});
+      else missing.push(d);
+      // 只有 @变体的天在「每周相同」视图里不提供新建（会覆盖分周安排），
+      // 需先在某一周的列头点「合并为每周相同」
+    }
   });
+
+  // 加天按钮：新建一天 = 按默认作息节数填空（无课处留空），不替用户乱排
+  // 加天按钮：新建一天 = 按默认作息节数填空（无课处留空），不替用户乱排。
+  // 班级还没有任何 @分周安排时，第一次加的天写成普通键（每周相同），
+  // 之后在某一周改动才会拆分；已有分周安排则加到当前周。
+  const anyDiv=Object.keys(cls.schedule).some(
+    k=>{const p=parseDay(k);return p&&p.div>0;});
+  missing.forEach(d=>{
+    const b=el('button',{className:'sm',textContent:'+ '+ST.dayLabel[d]});
+    b.onclick=()=>{
+      const n=(ST.timelayouts[cls.timelayout]||{slots:[]}).slots.length;
+      const blank=new Array(n).fill('');
+      const asDiv=curWeek>=1&&anyDiv;
+      cls.schedule[asDiv?dayKey(d,curWeek):d]=blank;
+      mark('classes'); render();
+    };
+    da.appendChild(b);
+  });
+
   if(!cols.length){
-    tb.innerHTML='<tr><td style="padding:18px;color:var(--dim)">本周暂无排课。</td></tr>';
+    tb.innerHTML='<tr><td style="padding:18px;color:var(--dim)">'+
+      (curWeek>=1?('第 '+curWeek+' 周暂无排课'+(missing.length?'，用上方按钮添加某天':'')):
+       '还没有「每周相同」的排课')+'</td></tr>';
     return;
   }
 
@@ -427,12 +658,52 @@ function renderGrid(cls){
     ...cols.map(c=>(ST.timelayouts[getDay(cls,c.key).tl]||{slots:[]}).slots.length));
 
   const thead=el('tr');
-  thead.innerHTML='<th class="slot">节次 / 时间</th>'+
-    cols.map(c=>{
-      const g=getDay(cls,c.key);
-      const diff=g.tl!==cls.timelayout?`<br><span style="color:var(--warn);font-weight:400;font-size:11px">${g.tl}</span>`:'';
-      return `<th>${ST.dayLabel[c.day]}${diff}</th>`;
-    }).join('');
+  thead.appendChild(el('th',{className:'slot',textContent:'节次 / 时间'}));
+  cols.forEach(c=>{
+    const g=getDay(cls,c.key);
+    const th=el('th');
+    const diff=g.tl!==cls.timelayout?
+      `<br><span style="color:var(--warn);font-weight:400;font-size:11px">${g.tl}</span>`:'';
+    const hint=c.mode==='inherited'?
+      '<div class="inh" title="跟随「每周相同」；一改就自动拆分出本周版本">跟随每周相同</div>':'';
+    th.innerHTML=`${ST.dayLabel[c.day]}${diff?'<br>'+diff:''}${hint}`;
+    // 单日作息覆盖（如周五用短作息）：选非默认值会写成 dict 形式并自动
+    // 增减格子；选回默认作息则还原成简洁的 list 形式
+    const tlsel=el('select',{className:'colsel'});
+    Object.keys(ST.rawLayouts).forEach(n=>{
+      tlsel.appendChild(el('option',{value:n,textContent:n,
+        selected:n===g.tl}));
+    });
+    tlsel.onchange=()=>{
+      let key=c.key;
+      if(c.mode==='inherited'){splitDay(cls,c.day);key=dayKey(c.day,curWeek);}
+      const gg=getDay(cls,key);
+      const want=(ST.timelayouts[tlsel.value]||{slots:[]}).slots.length;
+      const lst=gg.list.slice();
+      while(lst.length<want) lst.push('');
+      if(lst.length>want) lst.length=want;
+      if(tlsel.value===cls.timelayout) cls.schedule[key]=lst;
+      else cls.schedule[key]={timelayout:tlsel.value,classes:lst};
+      mark('classes'); render();
+    };
+    th.appendChild(tlsel);
+    if(c.mode==='div'){
+      // ↺ = 删掉本周该天特殊安排；⇈ = 把各周版本合并回「每周相同」
+      const del=el('button',{className:'colact',textContent:'↺',
+        title:'删除第'+curWeek+'周该天的特殊安排（若有每周相同版本则恢复跟随）'});
+      del.onclick=()=>dropVariant(cls,c.day,curWeek);
+      const merge=el('button',{className:'colact',textContent:'⇈',
+        title:'以本周内容为准，合并为「每周相同」（删除全部 @分周 版本）'});
+      merge.onclick=()=>{
+        if(confirm('把「'+ST.dayLabel[c.day]+'」各周安排合并为每周相同？\n'
+          +'将以第 '+curWeek+' 周内容为准，删除其它周版本。')){
+          mergeDay(cls,c.day,curWeek); mark('classes'); render();
+        }
+      };
+      th.appendChild(del); th.appendChild(merge);
+    }
+    thead.appendChild(th);
+  });
   tb.appendChild(thead);
 
   for(let r=0;r<maxRows;r++){
@@ -447,26 +718,47 @@ function renderGrid(cls){
     const s=mainTl.slots[r];
     tr.innerHTML=`<th class="slot">${r+1}　${s?s.start+'-'+s.end:''}</th>`;
     cols.forEach(c=>{
-      const g=getDay(cls,c.key);
+      const g0=getDay(cls,c.key);
       const td=el('td');
-      if(r>=(ST.timelayouts[g.tl]||{slots:[]}).slots.length){
-        td.style.background='#12161b'; tr.appendChild(td); return;
+      if(r>=(ST.timelayouts[g0.tl]||{slots:[]}).slots.length){
+        td.className='nodata'; tr.appendChild(td); return;
       }
-      const v=g.list[r]||'';
+      const v=g0.list[r]||'';
       if(!v) td.className='empty';
       const sl=el('select');
       sl.innerHTML='<option value="">—</option>'+
         ST.subjects.map(n=>`<option${n===v?' selected':''}>${n}</option>`).join('');
       sl.onchange=()=>{
+        let key=c.key, g=g0, mode=c.mode;
+        if(mode==='inherited'){
+          // 在第 N 周改了「每周相同」的一天 → 先整套拆成 @1..@N 再改。
+          // 绝不能直接写普通键：那会把其它周也改掉，还会与分周版本叠加。
+          splitDay(cls,c.day);
+          key=dayKey(c.day,curWeek);
+          g=getDay(cls,key);
+          toast('已把「'+ST.dayLabel[c.day]+'」拆分为按周轮换，当前编辑第 '+curWeek+' 周','ok');
+        }
         g.list[r]=sl.value;
-        setDay(cls,c.key,g.list,g.tl,g.dict);
+        setDay(cls,key,g.list,g.tl,g.dict);
         td.className=sl.value?'':'empty';
         mark('classes');
+        if(mode==='inherited') render();
       };
       td.appendChild(sl); tr.appendChild(td);
     });
     tb.appendChild(tr);
   }
+}
+
+// 删除某一天的某周版本；有普通键（每周相同）则恢复跟随，
+// 没有就确认 —— 那一周当天会变成无课（其它周不动）
+function dropVariant(cls,day,div){
+  if(cls.schedule[day]==null){
+    if(!confirm('「'+ST.dayLabel[day]+'」没有每周相同版本。\n'
+      +'删除第 '+div+' 周安排后，第 '+div+' 周当天将无课（其它周不受影响）。继续？'))return;
+  }
+  delete cls.schedule[dayKey(day,div)];
+  mark('classes'); render();
 }
 
 /* ══ 作息编辑 ════════════════════════════════════════════ */
@@ -985,19 +1277,95 @@ $('#bPub').onclick=async()=>{
 
 $('#fName').oninput=()=>{ST.classes[cur].name=$('#fName').value;mark('classes')};
 $('#fWeeks').oninput=()=>{
-  ST.classes[cur].weeks=parseInt($('#fWeeks').value)||2; mark('classes');
+  const cls=ST.classes[cur];
+  const n=parseInt($('#fWeeks').value)||2;
+  // 缩小周数：越界的 @键 会被 build 拦下（@序号超范围）。主动处理，
+  // 不能把用户卡在「weeks 填了但存不回去」的状态。
+  const over=Object.keys(cls.schedule||{}).filter(k=>{
+    const p=parseDay(k);return p&&p.div>n;
+  });
+  if(over.length&&!confirm('缩小为 '+n+' 周后，这些分周安排将越界：\n'
+    +over.join('、')+'\n删除它们？（有每周相同版本的天会恢复跟随）')) return;
+  if(over.length){over.forEach(k=>delete cls.schedule[k]);curWeek=Math.min(curWeek,n);}
+  cls.weeks=n; mark('classes'); render();
 };
+$('#clsDel').onclick=delClass;
 $('#fTl').onchange=()=>{
   ST.classes[cur].timelayout=$('#fTl').value; mark('classes'); render();
 };
 
 window.onbeforeunload=()=>D.size?'有未保存的改动':null;
 
+// ── 首次使用向导 ────────────────────────────────────────────
+const guide=$('#guide');
+let gSetup=null;
+function openGuide(){ guide.classList.add('show'); refreshGuideStatus(); }
+function closeGuide(){ guide.classList.remove('show'); }
+$('#bGuide').onclick=openGuide;
+$('#gCancel').onclick=closeGuide;
+guide.addEventListener('click',e=>{ if(e.target===guide) closeGuide(); });
+
+async function refreshGuideStatus(){
+  const box=$('#gStatus'); box.className='gstatus'; box.textContent='检查中…';
+  try{
+    const s=await api('/api/repo');
+    const yes=(ok,t)=>`<span class="pill-status ${ok?'ok':'no'}">${ok?'✓':'✗'} ${t}</span>`;
+    const linked=s.isGit;
+    let html='本地仓库副本：<code>'+s.liveRepo+'</code><br>'+
+      yes(linked, linked?'已 clone':'未连接')+'<br>';
+    if(linked){
+      html+='远端 origin：<code>'+(s.remote||'(未设置)')+'</code><br>'+
+        '推送分支：<code>'+s.branch+'</code>'+(s.dirty?' <span class="pill-status no">有未提交改动</span>':'')+'<br>';
+    }
+    const baseOk=s.baseUrl && !s.baseUrl.includes('CHANGE_ME');
+    html+='发布地址 base_url：'+(baseOk
+        ? yes(true,'已配置')+' <code>'+s.baseUrl+'</code>'
+        : yes(false,'未配置（示例占位）'));
+    box.innerHTML=html;
+  }catch(e){ box.className='gstatus bad'; box.textContent='✗ '+e.message; }
+}
+
+$('#gConnect').onclick=async()=>{
+  const url=$('#gUrl').value.trim();
+  const res=$('#gResult');
+  if(!url){ toast('请先粘贴仓库地址','bad'); return; }
+  $('#gConnect').disabled=true; res.hidden=false; res.className='gstatus';
+  res.textContent='正在解析地址 / clone 仓库 / 探测分支…';
+  try{
+    gSetup=await api('/api/repo/setup',{url});
+    let t=(gSetup.cloned?'✓ 已 clone':'✓ 已绑定现有副本')+' → '+gSetup.liveRepo+'\n'+
+      '平台：'+gSetup.platform+'　默认分支：'+gSetup.branch+'\n';
+    if(gSetup.note) t+='注：'+gSetup.note+'\n';
+    if(gSetup.rawBase){
+      t+='客户端 raw 发布地址：\n'+gSetup.rawBase;
+    }else{
+      t+='⚠ '+gSetup.rawError;
+    }
+    res.className='gstatus ok'; res.textContent=t;
+    $('#gApply').hidden=!gSetup.rawBase;
+    toast('仓库连接成功','ok');
+  }catch(e){ gSetup=null; res.className='gstatus bad'; res.textContent='✗ '+e.message; }
+  finally{ $('#gConnect').disabled=false; }
+};
+
+$('#gApply').onclick=async()=>{
+  if(!gSetup||!gSetup.rawBase) return;
+  $('#gApply').disabled=true;
+  try{
+    await api('/api/repo/apply-base',{base_url:gSetup.rawBase});
+    toast('已把发布地址写进课表，正在重新载入','ok');
+    closeGuide();
+    await reload();
+  }catch(e){ toast('写入失败：'+e.message,'bad'); }
+  finally{ $('#gApply').disabled=false; }
+};
+
 async function reload(){
   ST=await api('/api/state');
   setRows=null;                  // 设置行从新 state 重建
   recalcLayouts();
   if(cur>=ST.classes.length) cur=0;
+  curWeek=ST.classes[cur]?classStartWeek(ST.classes[cur]):1;
   render(); showPane();
 }
 (async()=>{

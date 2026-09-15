@@ -32,7 +32,7 @@ ClassIsland 的集控支持「无服务端模式」（`ServerKind: 0`）——�
 - **改作息自动同步课表**：增删「上课」节次时，用此作息的所有班级课表跟着补空位/删格子，不会卡在「节数不一致」的死胡同
 - **一键装机预设**：直接下载 `ManagementPreset.json`，放进客户端程序目录即自动接入集控
 - **单文件 HTTP 服务**：只用 Python 标准库 + PyYAML，不需要 npm / 前端构建
-- **多周轮换**：`mon@1` / `mon@2` 语法，支持任意 N 周轮换
+- **多周轮换**：`mon@1` / `mon@2` 语法，支持任意 N 周轮换；网页上切到「第 N 周」直接改某天即可自动拆分，列头可一键合并回「每周相同」
 - **按天切换作息**：周五提前放学、周日晚自习都能单独指定作息
 - **Version 自动管理**：内容哈希驱动自增，杜绝「改了没生效」
 - **发布安全闸门**：发布前检查悬空引用、覆盖影响、Version 单调性，不通过就拒绝发布
@@ -43,26 +43,34 @@ ClassIsland 的集控支持「无服务端模式」（`ServerKind: 0`）——�
 
 ## 快速开始
 
-需要 Python 3.9+ 和 PyYAML。
+需要 Python 3.9+（唯一第三方依赖是 PyYAML）。下载发布包解压后：
 
-```bash
-git clone https://gitee.com/<你的用户名>/classisland-server.git
-cd classisland-server
-pip install pyyaml
+- **Windows**：双击 `start-webui.bat`
+- **Linux / macOS**：`./start-webui.sh`
 
-# 准备自己的课表和配置
-cp examples/schedule.example.yaml schedule.yaml
-cp config.example.json config.json
+脚本会在缺依赖时自动 `pip install -r requirements.txt`，默认端口 8848
+（也可带参数：`./start-webui.sh 8000`）。
 
-# 启动网页界面
-python3 tools/webui.py --port 8848
-```
+然后浏览器打开 `http://<本机IP>:8848`。
 
-然后浏览器打开 `http://<本机IP>:8848`。页面上方六个页签：
+第一次打开时：
+
+1. 程序发现还没有 `schedule.yaml`，会自动用内置示例**播种一份**
+   （能直接构建通过，绝不在这一步报错挡住你）；
+2. 点页面右上角的 **「首次使用向导」**，粘贴你自己新建的**公开**仓库地址，
+   向导会自动 clone、识别默认分支、算出客户端访问的 raw 发布地址并写回；
+3. 在各页签里把示例改成自己学校的课表，点「保存」；
+4. 点「发布到线上」即可。
+
+> 手动方式（不用向导）：
+> `cp examples/schedule.example.yaml schedule.yaml`、
+> `cp config.example.json config.json`，再 `python3 tools/webui.py`。
+
+页面上方六个页签：
 
 | 页签 | 能改什么 |
 |---|---|
-| 课表 | 按班级排课（行=节次并标真实时间）、班级名、默认作息、轮换周数 |
+| 课表 | 新增/删除班级、按班级排课（行=节次并标真实时间）、班级名、默认作息、单日换作息、任意周数轮换 |
 | 作息 | 新建/改名/删除作息表，增删节次与课间、调时间、插分割线 |
 | 科目 | 登记官方 21 科之外的自定义科目（简称/教师/户外） |
 | 默认设置 | 下发给客户端的默认设置（`DefaultSettingsSource`） |
@@ -88,9 +96,12 @@ python3 tools/preflight.py --dist dist --live ./live-repo   # 发布前安全检
 | `live_repo` | 目标仓库的本地克隆路径，发布时写入这里再 push |
 | `backup_dir` | 备份目录。每次保存 YAML、每次覆盖线上文件前都会自动备份。**置为空字串即关闭备份**（真正的历史在目标仓库的 git 里，备份只是本地保险） |
 | `git_exec_path` | 一般留空。仅当你的 git 的 `--exec-path` 指向错误目录时才需要（某些 NAS 套件版 git 有这个打包问题，会导致 https 传输不可用） |
-| `git_branch` | 推送分支，默认 `master` |
+| `git_branch` | 推送分支，默认 `master`。用网页向导连接仓库时会自动探测远端默认分支并写回，一般无需手填 |
+| `git_user_name` | 自动提交时的 commit 作者名，默认 `classisland-server` |
+| `git_user_email` | 自动提交时的 commit 邮箱，默认 `classisland-server@localhost` |
 
-也可以用环境变量覆盖：`CISRV_LIVE_REPO`、`CISRV_BACKUP_DIR` 等。
+也可以用环境变量覆盖：`CISRV_LIVE_REPO`、`CISRV_BACKUP_DIR`、
+`CISRV_GIT_BRANCH`、`CISRV_GIT_USER_NAME`、`CISRV_GIT_USER_EMAIL` 等。
 
 ### 按班配任课老师（1.2.0）
 
@@ -116,12 +127,15 @@ classes:
 
 ## 部署到 Gitee / GitHub
 
-1. 新建一个仓库存放**生成出来的配置**（跟本项目分开放）
-2. 克隆到本地，路径填进 `config.json` 的 `live_repo`
-3. `schedule.yaml` 里的 `publish.base_url` 填该仓库的 raw 地址：
+1. 新建一个**公开**仓库存放**生成出来的配置**（跟本项目分开放）。
+   ⚠️ 必须公开：客户端不带任何凭据去拉这些 JSON，私有仓库大屏会拉不到。
+2. 在网页「首次使用向导」里粘贴该仓库地址，向导会自动 clone 到本地的
+   `live-repo/` 并识别默认分支；也可以手动克隆后把路径填进
+   `config.json` 的 `live_repo`。
+3. 向导会自动算出并写回 `publish.base_url`（也可在「基本信息」页手改）：
    - Gitee：`https://gitee.com/<用户>/<仓库>/raw/master`
    - GitHub：`https://raw.githubusercontent.com/<用户>/<仓库>/main`
-4. 网页上点「发布到线上」，或手动 `git push`
+4. 网页上点「发布到线上」，或手动 `git push`。
 
 **为什么用 raw 而不是 Pages**：Gitee 免费版 Pages 每次更新都要手动点一次「部署」，没法自动化。raw 地址推送后即时生效（CDN 缓存约 60 秒）。
 
@@ -170,18 +184,23 @@ policy.json            集控策略（全校统一）
 ## 目录结构
 
 ```
+start-webui.sh / .bat  一键启动（缺依赖自动安装）
+requirements.txt       唯一第三方依赖（PyYAML）
 src/
-  appconfig.py    环境配置（路径、git 参数）
+  appconfig.py    环境配置（路径、git 参数、提交身份）
+  repourl.py      仓库地址推导（粘贴 URL → clone/raw 地址，纯函数）
   ci_schema.py    ClassIsland 数据结构常量与构造器
   build.py        YAML → 完整 Default.json（所有校验都在这里）
   split.py        YAML → 集控静态文件树 + Version 管理
   yaml_edit.py    按段改写 YAML（保留注释与紧凑写法）
 tools/
-  webui.py        网页服务端
+  webui.py        网页服务端（含首次使用向导接口）
   webui.html      网页前端（单文件，无构建）
   preflight.py    发布前安全检查
   prune_ids.py    清理已删班级在线上的残留目录
   import_live.py  把线上既有配置反向导入成 YAML
+  build_release.py        打包干净的独立发布压缩包
+  build_windows_bundle.py 打包「开箱即入控」的 Windows 客户端整合包
 docs/
   SCHEMA.md       实测得出的数据格式说明
 reference/
@@ -201,6 +220,21 @@ reference/
 **只写不删。** `split.py` 从不删除线上文件。线上可能有别人手工加的目录，生成器擅自删除等于替用户做决定。删除是独立工具 `prune_ids.py`，默认 dry-run。
 
 **先备份再覆盖。** 每次保存 YAML、每次覆盖线上文件前都自动备份到 `backup_dir`。
+
+## 自己打包发布物
+
+发布给别人用的压缩包只含程序与示例，绝不夹带本机的 `config.json`、真实
+`schedule.yaml`、`dist*/`、`live-repo/`、`backups/` 等：
+
+```bash
+python3 tools/build_release.py                 # 产物到 release/classisland-server-<版本>.zip
+python3 tools/build_release.py --format tar.gz # tar.gz 格式
+```
+
+打包前会做脱敏检查：通用的本机绝对路径模式直接拦；个人/私有词表（姓名、私有仓库名等）通过环境变量 `CISRV_PRIVATE_TERMS`（逗号分隔）提供，命中即拒绝出包。刻意不把任何人的私有词硬编码进开源仓库。
+
+另有面向**客户端装机**的 Windows 整合包脚本（把官方客户端与入控预设打在一起）：
+`tools/build_windows_bundle.py`，见其文件头说明。
 
 ## 数据格式
 

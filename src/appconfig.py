@@ -23,7 +23,12 @@ appconfig.py — 环境相关配置的唯一来源
                 仅在 git 的 --exec-path 不正确时才需要设置。
                 典型场景：某些 NAS 套件版 git 把 exec-path 指到不存在的
                 目录，导致 https 传输直接不可用。留空表示用系统默认。
-    git_branch  推送分支，默认 master（Gitee 新库默认分支通常是 master）
+    git_branch  推送分支，默认 master（Gitee 新库默认分支通常是 master）。
+                首次用网页向导 clone 仓库时会自动探测远端默认分支并写回，
+                一般无需手填。
+    git_user_name / git_user_email
+                自动提交时用的作者身份。仅是生成仓库里的 commit 署名，
+                任何人都可以改成自己的（环境变量 CISRV_GIT_USER_NAME 等）。
 """
 from __future__ import annotations
 
@@ -38,6 +43,8 @@ _DEFAULTS = {
     "backup_dir": str(ROOT / "backups"),
     "git_exec_path": "",
     "git_branch": "master",
+    "git_user_name": "classisland-server",
+    "git_user_email": "classisland-server@localhost",
 }
 
 _ENV_PREFIX = "CISRV_"
@@ -101,6 +108,14 @@ def git_branch() -> str:
     return get("git_branch")
 
 
+def git_user_name() -> str:
+    return get("git_user_name")
+
+
+def git_user_email() -> str:
+    return get("git_user_email")
+
+
 def git_env() -> dict:
     """给 subprocess 用的环境变量；仅在需要时注入 GIT_EXEC_PATH。"""
     env = dict(os.environ)
@@ -113,3 +128,28 @@ def git_env() -> dict:
 def describe() -> str:
     c = _load()
     return "\n".join(f"  {k:14} {c[k] or '(默认)'}" for k in sorted(c))
+
+
+def save_user_config(updates: dict) -> None:
+    """合并写入项目根的 config.json（网页向导探测到远端默认分支等时用）。
+
+    未知键直接拒绝，与 _load() 的严格口径保持一致，避免静默拼错。
+    写后清空缓存，让后续 get() 立即看到新值。
+    """
+    global _cache
+    bad = set(updates) - set(_DEFAULTS)
+    if bad:
+        raise ValueError(f"未知配置项: {sorted(bad)}；可用: {sorted(_DEFAULTS)}")
+    f = ROOT / "config.json"
+    data = {}
+    if f.exists():
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            raise ValueError(f"config.json 不是合法 JSON：{e}")
+    data.update(updates)
+    tmp = f.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+                   encoding="utf-8")
+    tmp.replace(f)
+    _cache = None

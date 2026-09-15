@@ -37,6 +37,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 import appconfig  # noqa: E402
+import repourl as RU  # noqa: E402
 # 商店版 git 的 --exec-path 指向了不存在的 /var/packages/git/...，
 GIT_ENV = appconfig.git_env()
 
@@ -132,14 +133,18 @@ def main() -> int:
         import yaml
         doc = yaml.safe_load((ROOT / "schedule.yaml").read_text(encoding="utf-8"))
         base = ((doc.get("publish") or {}).get("base_url") or "")
-        m = re.match(r"(https://gitee\.com/[^/]+/[^/]+)/raw/", base)
-        if not m:
-            print(f"✗ 无法从 base_url 推出仓库地址: {base}", file=sys.stderr)
+        url = RU.repo_web_from_raw(base)
+        # 已提供本地副本（--live）时，url 只用于打印，推不出来不该阻断：
+        # webui 总是传已 clone 好的 live_repo，自建/内网 raw 地址本来就
+        # 反推不成 https 仓库地址。只有需要我们自己 clone 时它才是必需的。
+        if not url and not a.live:
+            print(f"✗ 无法从 base_url 推出仓库地址（支持 Gitee/GitHub raw）：{base}\n"
+                  f"  可用 --url 显式指定，或用 --live 给出本地仓库副本",
+                  file=sys.stderr)
             return 1
-        url = m.group(1)
 
     live = Path(a.live) if a.live else clone_live(url)
-    print(f"线上: {url}\n本地: {dist}\n")
+    print(f"线上: {url or '(本地副本，地址未知)'}\n本地: {dist}\n")
 
     problems: list[str] = []
     warnings: list[str] = []

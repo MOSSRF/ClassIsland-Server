@@ -24,3 +24,7 @@ venv/
 .idea/
 .DS_Store
 *.swp
+
+# 发布产物
+dist-server/
+release/

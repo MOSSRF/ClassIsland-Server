@@ -25,6 +25,7 @@ import base64
 import hmac
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -40,6 +41,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import yaml                                    # noqa: E402
 import appconfig                                # noqa: E402
 import ci_schema as S                          # noqa: E402
+import repourl as RU                            # noqa: E402
 import yaml_edit as YE                         # noqa: E402
 from build import BuildError, build as build_profile   # noqa: E402
 
@@ -82,6 +84,170 @@ DAY_LABEL = {"mon": "周一", "tue": "周二", "wed": "周三", "thu": "周四",
 DAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 _lock = threading.Lock()
+
+
+# ── 首次启动：缺 schedule.yaml 时用示例播种 ─────────────────────
+
+def ensure_seed(fname: str) -> bool:
+    """工作课表不存在时，从 examples/ 复制一份作为起点。返回是否新建。
+
+    开箱即用的关键一环：用户解压后什么都不配也能直接打开网页，看到一份
+    能构建通过的示例，而不是被「找不到 schedule.yaml」挡在门外。
+    仅在根目录缺失时播种一次，绝不覆盖用户已有的课表。
+    """
+    p = ROOT / fname
+    if p.exists():
+        return False
+    if p.parent != ROOT or p.suffix not in (".yaml", ".yml"):
+        return False
+    candidates = [ROOT / "examples" / "schedule.example.yaml",
+                  ROOT / "examples" / p.name]
+    for src in candidates:
+        if src.exists():
+            shutil.copyfile(src, p)
+            return True
+    return False
+
+
+# ── 连接你自己的仓库（首次使用向导） ────────────────────────────
+
+def _git(args: list[str], cwd: Path | None = None,
+         timeout: int = 180) -> subprocess.CompletedProcess:
+    return subprocess.run(args, cwd=cwd, env=appconfig.git_env(),
+                          capture_output=True, text=True, timeout=timeout)
+
+
+def _remote_default_branch(url: str) -> str | None:
+    """探测远端默认分支（main/master/…）；探测不到返回 None。"""
+    try:
+        r = _git(["git", "ls-remote", "--symref", url, "HEAD"], timeout=60)
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    # 输出形如：ref: refs/heads/master\tHEAD
+    for line in (r.stdout or "").splitlines():
+        if line.startswith("ref: refs/heads/"):
+            return line.split("refs/heads/", 1)[1].split("\t", 1)[0].strip()
+    return None
+
+
+def repo_status() -> dict:
+    """向导用：当前发布仓库的连接状态。"""
+    live = LIVE_REPO
+    info = {
+        "liveRepo": str(live),
+        "exists": live.exists(),
+        "isGit": (live / ".git").exists(),
+        "remote": "",
+        "branch": appconfig.git_branch(),
+        "baseUrl": "",
+        "dirty": False,
+    }
+    # 当前课表里的发布地址
+    try:
+        doc = yaml.safe_load(yaml_path(FILE).read_text(encoding="utf-8")) or {}
+        info["baseUrl"] = ((doc.get("publish") or {}).get("base_url") or "")
+    except Exception:
+        info["baseUrl"] = ""
+    if info["isGit"]:
+        r = _git(["git", "remote", "get-url", "origin"], cwd=live)
+        if r.returncode == 0:
+            info["remote"] = r.stdout.strip()
+        r = _git(["git", "status", "--porcelain"], cwd=live)
+        info["dirty"] = bool((r.stdout or "").strip())
+    return info
+
+
+def repo_setup(body: dict) -> dict:
+    """根据用户粘贴的仓库地址，完成 clone（或绑定已有目录）并写回配置。
+
+    步骤：解析地址 → 探测默认分支 → 必要时 clone → 写 config.json 的
+    live_repo / git_branch → 计算 raw 地址回传给前端（由前端确认后写入 yaml）。
+    """
+    global LIVE_REPO
+    text = (body.get("url") or "").strip()
+    rid = RU.parse_repo(text)              # 无法识别会抛 ValueError
+    url = RU.clone_url(rid)
+
+    branch = (_remote_default_branch(url)
+              or (body.get("branch") or "").strip()
+              or "master")
+
+    live = LIVE_REPO
+    cloned = False
+    note = ""
+    if live.exists() and (live / ".git").exists():
+        # 已绑定仓库：校验 origin 是否指向同一地址，避免静默写错地方
+        r = _git(["git", "remote", "get-url", "origin"], cwd=live)
+        cur = (r.stdout or "").strip()
+        if cur and rid.slug not in cur:
+            raise ValueError(
+                f"{live} 已是另一个仓库（{cur}）的克隆，拒绝改绑。"
+                "如需更换，请先在 config.json 修改 live_repo。")
+    elif live.exists() and any(live.iterdir()):
+        raise ValueError(f"目标目录 {live} 已存在且非空（也不是 git 仓库），"
+                         "请换一个空目录或在 config.json 指定 live_repo。")
+    else:
+        live.parent.mkdir(parents=True, exist_ok=True)
+        r = _git(["git", "clone", "-q", "--branch", branch, url, str(live)])
+        note = ""
+        if r.returncode != 0:
+            # 某些空仓库克隆指定分支会失败，退回不带分支克隆
+            r2 = _git(["git", "clone", "-q", url, str(live)])
+            if r2.returncode != 0:
+                # 全新空仓库（Gitee/GitHub 刚建的库往往零提交）根本 clone 不下来。
+                # 本地 init 并绑定 origin，首次发布时 push 会建立远程分支。
+                live.mkdir(parents=True, exist_ok=True)
+                ri = _git(["git", "init", "-q", "-b", branch], cwd=live)
+                if ri.returncode != 0:                 # 旧版 git 没有 -b
+                    _git(["git", "init", "-q"], cwd=live)
+                    _git(["git", "symbolic-ref", "HEAD",
+                          f"refs/heads/{branch}"], cwd=live)
+                _git(["git", "remote", "add", "origin", url], cwd=live)
+                note = "远端是空仓库：已在本地初始化并绑定，首次发布时会创建远程分支。"
+        cloned = True
+
+    # 持久化路径与分支
+    appconfig.save_user_config(
+        {"live_repo": str(live), "git_branch": branch})
+    # 同步刷新模块级全局：否则同一进程内紧接着发布仍会用旧路径
+    LIVE_REPO = appconfig.live_repo()
+
+    raw = ""
+    raw_error = ""
+    try:
+        raw = RU.raw_base(rid, branch)
+    except ValueError as e:
+        raw_error = str(e)
+
+    return {"ok": True, "cloned": cloned, "platform": rid.platform,
+            "cloneUrl": url, "webUrl": RU.web_url(rid),
+            "branch": branch, "liveRepo": str(live),
+            "rawBase": raw, "rawError": raw_error,
+            "note": note,
+            "slug": rid.slug}
+
+
+def repo_apply_base(body: dict) -> dict:
+    """把向导确认的 raw 发布地址写进 schedule.yaml 的 publish.base_url。"""
+    raw = (body.get("base_url") or "").strip()
+    if not raw:
+        raise ValueError("base_url 为空")
+    p = yaml_path(FILE)
+    text = p.read_text(encoding="utf-8")
+    new = YE.upsert_section(text, "publish", YE.dump_publish(raw))
+    # 构建校验一次，避免把坏 yaml 留到发布
+    doc = yaml.safe_load(new)
+    w: list[str] = []
+    build_profile(doc, w)
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_write(f"{ts}.{p.stem}.yaml", text.encode("utf-8"))
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(new, encoding="utf-8")
+    os.replace(tmp, p)
+    return {"ok": True, "base_url": raw}
+
 
 
 # ── 数据读取 ────────────────────────────────────────────────────
@@ -347,8 +513,8 @@ def do_publish(fname: str, message: str) -> dict:
 
     steps.append(run(["git", "add", "-A"], LIVE_REPO))
     msg = (message or "").strip() or "由流水线生成：课表更新"
-    steps.append(run(["git", "-c", "user.name=moss-pipeline",
-                      "-c", "user.email=moss@nas.local",
+    steps.append(run(["git", "-c", f"user.name={appconfig.git_user_name()}",
+                      "-c", f"user.email={appconfig.git_user_email()}",
                       "commit", "-q", "-m", msg], LIVE_REPO))
     push = run(["git", "push", "origin", appconfig.git_branch()], LIVE_REPO)
     steps.append(push)
@@ -425,6 +591,8 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, html, "text/html; charset=utf-8")
             if path == "/api/state":
                 return self._json(read_state(FILE))
+            if path == "/api/repo":
+                return self._json(repo_status())
             if path == "/api/preset":
                 # ManagementPreset.json：放到客户端程序目录即可自动加载集控。
                 # 之前它只生成在 dist/ 里，用户在界面上拿不到，只能自己去
@@ -480,6 +648,16 @@ class H(BaseHTTPRequestHandler):
             with _lock:                       # 串行化，避免并发写坏 yaml
                 if path == "/api/save":
                     return self._json(save_state(FILE, body))
+                if path == "/api/repo/setup":
+                    try:
+                        return self._json(repo_setup(body))
+                    except ValueError as e:
+                        return self._json({"error": str(e)}, 400)
+                if path == "/api/repo/apply-base":
+                    try:
+                        return self._json(repo_apply_base(body))
+                    except ValueError as e:
+                        return self._json({"error": str(e)}, 400)
                 if path == "/api/build":
                     return self._json(do_build(FILE))
                 if path == "/api/preflight":
@@ -507,12 +685,26 @@ def main() -> int:
     a = ap.parse_args()
     FILE = a.file
 
+    # 开箱即用：缺工作课表时先用示例播种（只播种一次，不覆盖用户数据）
+    try:
+        seeded = ensure_seed(FILE)
+    except Exception:
+        traceback.print_exc()
+        seeded = False
+
     if not yaml_path(FILE).exists():
-        print(f"✗ 找不到 {ROOT / FILE}", file=sys.stderr)
+        print(f"✗ 找不到 {ROOT / FILE}，且 examples/ 下没有可播种的示例",
+              file=sys.stderr)
         return 1
 
     srv = ThreadingHTTPServer((a.host, a.port), H)
     print(f"✓ 课表编辑界面: http://{a.host}:{a.port}   (编辑 {FILE})")
+    if seeded:
+        print("  · 未发现 schedule.yaml，已用 examples/schedule.example.yaml "
+              "生成一份示例作为起点。")
+    if not LIVE_REPO.exists():
+        print("  · 还没连接发布仓库：打开网页后按顶部「首次使用向导」填入你自己的"
+              " 公开仓库地址即可。")
     print("  Ctrl-C 停止")
     try:
         srv.serve_forever()
