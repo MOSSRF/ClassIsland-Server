@@ -31,10 +31,13 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-import yaml
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
+
+import vendor_bootstrap  # noqa: E402
+vendor_bootstrap.activate()
+
+import yaml
 
 import appconfig  # noqa: E402
 BACKUP_DIR = appconfig.backup_dir()

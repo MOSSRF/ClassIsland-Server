@@ -43,12 +43,22 @@ ClassIsland 集控支持无服务端模式（`ServerKind: 0`）：将若干 JSON
 
 ## 快速开始
 
-环境要求：Python 3.9 及以上版本，唯一第三方依赖为 PyYAML。下载并解压发布包后，根据操作系统执行：
+提供三种发布包，按目标机器情况选择：
+
+| 发布包 | 体积 | 适用 |
+| --- | --- | --- |
+| `classisland-server-<版本>-windows-x64.zip` | 约 50 MB | Windows x64，**Python 和 Git 都内置，真正零安装** |
+| `classisland-server-<版本>-linux-x64.tar.gz` | 约 19 MB | glibc Linux x86_64，内置 Python（git 一般系统自带） |
+| `classisland-server-<版本>.zip`（纯源码） | 约 0.4 MB | 已装 Python 3.9+ 与 git 的任意平台（含 macOS） |
+
+便携包已内置 Python 运行时（`runtime/`）与纯 Python 版 PyYAML（`vendor/`）。下载并解压对应发布包后：
 
 - **Windows**：双击运行 `start-webui.bat`
 - **Linux / macOS**：执行 `./start-webui.sh`
 
-启动脚本会在缺少依赖时自动执行 `pip install -r requirements.txt`。默认端口为 `8848`，也可通过参数指定，例如 `./start-webui.sh 8000`。
+启动脚本会优先使用包内 `runtime/` 的解释器；纯源码包则回退到系统 Python 3.9+。两种包都**无需联网、无需 `pip install`**（仅当你自行裁剪了 `vendor/` 又没用便携运行时时，才需 `pip install -r requirements.txt`）。默认端口为 `8848`，也可通过参数指定，例如 `./start-webui.sh 8000`。
+
+> **关于 git**：首次使用向导的 clone 与「发布到线上」依赖 git。**Windows 便携包已内置无头版 MinGit**，开箱即可拉取/推送；Linux 便携包与源码包使用系统 git（Linux 一般自带，macOS 首次运行会提示安装 Xcode 命令行工具）。打开网页、编辑课表、本地生成/预览配置不依赖 git。
 
 启动后在浏览器中访问 `http://<本机 IP>:8848`。
 
@@ -172,12 +182,14 @@ policy.json            集控策略（全校统一）
 ## 目录结构
 
 ```
-start-webui.sh / .bat  启动脚本（缺少依赖时自动安装）
-requirements.txt       第三方依赖（PyYAML）
+start-webui.sh / .bat  启动脚本（优先用内置运行时，免安装）
+requirements.txt       第三方依赖清单（仅开发/自行裁剪 vendor 时需要）
+vendor/                 内置的纯 Python PyYAML（跨平台，免安装）
 src/
   appconfig.py    环境配置（路径、Git 参数、提交身份）
   repourl.py      仓库地址推导（URL → clone/raw 地址，纯函数实现）
   ci_schema.py    ClassIsland 数据结构常量与构造器
+  vendor_bootstrap.py     内置依赖引导（vendor/ 与子进程 PYTHONPATH）
   build.py        YAML → 完整 Default.json（全部校验逻辑集中于此）
   split.py        YAML → 集控静态文件树及 Version 管理
   yaml_edit.py    按段改写 YAML（保留注释与紧凑写法）
@@ -187,7 +199,8 @@ tools/
   preflight.py    发布前安全检查
   prune_ids.py    清理已删除班级在线上仓库中的残留目录
   import_live.py  将线上既有配置反向导入为 YAML
-  build_release.py         构建独立发布压缩包
+  build_release.py         构建纯源码发布压缩包
+  build_portable.py        构建内置 Python 的便携包（Windows/Linux）
   build_windows_bundle.py  构建可直接接入集控的 Windows 客户端整合包
 docs/
   SCHEMA.md       实测得到的数据格式说明
@@ -214,9 +227,21 @@ reference/
 用于对外分发的压缩包仅包含程序与示例文件，不包含本机的 `config.json`、真实 `schedule.yaml`、`dist*/`、`live-repo/`、`backups/` 等内容：
 
 ```bash
+# 纯源码包（约 0.4MB，要求目标机自带 Python 3.9+）
 python3 tools/build_release.py                  # 输出至 release/classisland-server-<版本>.zip
 python3 tools/build_release.py --format tar.gz  # 输出 tar.gz 格式
+
+# 便携包（内置 Python 运行时，约 11MB Windows / 19MB Linux，免安装）
+python3 tools/build_portable.py --prepare       # 首次：从 release/_runtime 归档展开/裁剪运行时
+python3 tools/build_portable.py                 # 输出 *-windows-x64.zip 与 *-linux-x64.tar.gz
+python3 tools/build_portable.py --only linux    # 只打一个平台
 ```
+
+便携包的 Python 运行时是平台相关的原生二进制，**不随 git 分发**（`release/` 已被忽略）。打包前需把以下上游归档放到 `release/_runtime/`（版本与下载地址见 `tools/build_portable.py` 头部常量）：
+
+- Windows：官方 [embeddable Python](https://www.python.org/ftp/python/)（`python-3.11.9-embed-amd64.zip`）
+- Linux：[python-build-standalone](https://github.com/astral-sh/python-build-standalone) 的 `x86_64-unknown-linux-gnu install_only` 归档（可重定位、自带 OpenSSL；脚本会自动裁剪 pip/Tk/头文件等并 strip）
+- Windows 额外：官方 [MinGit](https://github.com/git-for-windows/git/releases)（`MinGit-<版本>-64-bit.zip`，无头 Git，含 libcurl/OpenSSL/CA 证书），使 Windows 包零安装即可 clone/发布
 
 打包前会执行脱敏检查：通用的本机绝对路径模式将被直接拦截；个人或私有词表（如姓名、私有仓库名）通过环境变量 `CISRV_PRIVATE_TERMS`（逗号分隔）提供，命中即终止打包。个人词表不写入源码，以避免在公开仓库中暴露私有命名。
 

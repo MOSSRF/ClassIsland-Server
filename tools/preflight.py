@@ -36,6 +36,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+import vendor_bootstrap  # noqa: E402
+vendor_bootstrap.activate()
+
 import appconfig  # noqa: E402
 import repourl as RU  # noqa: E402
 # 商店版 git 的 --exec-path 指向了不存在的 /var/packages/git/...，

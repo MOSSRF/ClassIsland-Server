@@ -41,7 +41,7 @@ INCLUDE_FILES = [
     ("start-webui.sh", False),
     ("start-webui.bat", False),
 ]
-INCLUDE_DIRS = ["src", "tools", "docs", "examples", "reference"]
+INCLUDE_DIRS = ["src", "tools", "vendor", "docs", "examples", "reference"]
 
 # 任何命中这些片段的路径都直接排除（双保险，防止私有数据泄漏进发布物）
 FORBIDDEN_PARTS = {

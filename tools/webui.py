@@ -38,6 +38,9 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+import vendor_bootstrap                        # noqa: E402
+vendor_bootstrap.activate()
+
 import yaml                                    # noqa: E402
 import appconfig                                # noqa: E402
 import ci_schema as S                          # noqa: E402

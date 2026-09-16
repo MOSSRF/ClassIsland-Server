@@ -36,6 +36,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+import vendor_bootstrap  # noqa: E402
+vendor_bootstrap.activate()
+
 import yaml  # noqa: E402
 
 PRESET_NAME = "ManagementPreset.json"

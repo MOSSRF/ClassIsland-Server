@@ -59,9 +59,12 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import vendor_bootstrap  # noqa: E402
+vendor_bootstrap.activate()
+
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_schema as S
 from build import BuildError
 from build import build as build_profile
