@@ -28,6 +28,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
+import vendor_bootstrap  # noqa: E402
+vendor_bootstrap.activate()  # 重定向输出锁 UTF-8（中文 Windows 下防 GBK 崩溃）
 import ci_schema as S  # noqa: E402
 
 TT_NAME = {0: "class", 1: "break", 2: "divider", 3: "action"}
