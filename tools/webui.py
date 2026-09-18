@@ -15,8 +15,10 @@ webui.py — 课表可视化编辑界面（单文件 HTTP 服务，零前端构�
     然后浏览器开 http://<NAS_IP>:8848
 
 安全：
-    默认只绑 0.0.0.0 供局域网用；这是内网工具，不做鉴权。
-    不要暴露到公网 —— 它能改课表并 push。
+    便携包的 start-webui.bat 默认只绑 127.0.0.1（本机管理工具，绑
+    0.0.0.0 会在 Windows 上弹防火墙窗且把无鉴权页面暴露到局域网）；
+    NAS/Linux 直跑本脚本仍默认 0.0.0.0 供内网用。无论哪种情况都不要
+    暴露到公网 —— 它能改课表并 push。
 """
 from __future__ import annotations
 
@@ -701,7 +703,9 @@ def main() -> int:
         return 1
 
     srv = ThreadingHTTPServer((a.host, a.port), H)
-    print(f"✓ 课表编辑界面: http://{a.host}:{a.port}   (编辑 {FILE})")
+    # 监听全网卡时提示用 localhost，避免把 0.0.0.0 原样抄进浏览器
+    shown = "localhost" if a.host in ("0.0.0.0", "", "::") else a.host
+    print(f"✓ 课表编辑界面: http://{shown}:{a.port}   (编辑 {FILE})")
     if seeded:
         print("  · 未发现 schedule.yaml，已用 examples/schedule.example.yaml "
               "生成一份示例作为起点。")

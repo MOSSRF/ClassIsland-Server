@@ -60,7 +60,7 @@ ClassIsland 集控支持无服务端模式（`ServerKind: 0`）：将若干 JSON
 
 > **关于 git**：首次使用向导的 clone 与「发布到线上」依赖 git。**Windows 便携包已内置无头版 MinGit**，开箱即可拉取/推送；Linux 便携包与源码包使用系统 git（Linux 一般自带，macOS 首次运行会提示安装 Xcode 命令行工具）。打开网页、编辑课表、本地生成/预览配置不依赖 git。
 
-启动后在浏览器中访问 `http://<本机 IP>:8848`。
+启动后在浏览器中访问 `http://localhost:8848`（Windows 便携包默认只监听本机回环地址，避免触发防火墙弹窗；Linux 默认监听所有网卡，内网可用 `http://<本机 IP>:8848` 访问。确需从局域网访问 Windows 实例时，可在命令后加参数 `--host 0.0.0.0`）。
 
 首次运行流程如下：
 

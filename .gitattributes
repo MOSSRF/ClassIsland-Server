@@ -1,0 +1,4 @@
+# Windows 批处理必须是 CRLF：cmd.exe 解析 LF-only 的括号代码块会错位，
+# 在中文 Windows（GBK 控制台）上直接把脚本内容当命令执行。
+*.bat text eol=crlf
+*.cmd text eol=crlf
