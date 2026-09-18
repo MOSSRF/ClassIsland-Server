@@ -120,6 +120,9 @@ def spawn(host: str, port: int) -> int:
     # 重定向到文件后 stdout 是块缓冲，不关掉缓冲日志会迟迟不落地，
     # 后台进程报错时用户只能看到一个空日志，最难排查。
     env["PYTHONUNBUFFERED"] = "1"
+    # 后台无控制台时子进程默认编码可能退化成 GBK，统一锁 UTF-8
+    #（build/split/preflight 的中文报错、日志才不会崩/乱码）。
+    env["PYTHONUTF8"] = "1"
     p = subprocess.Popen(
         cmd, cwd=str(ROOT), stdin=subprocess.DEVNULL,
         stdout=logf, stderr=subprocess.STDOUT,

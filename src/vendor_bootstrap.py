@@ -80,7 +80,26 @@ def activate() -> None:
 
     _activate_bundled_git()
 
+    _force_utf8_output()
+
     _activated = True
+
+
+def _force_utf8_output() -> None:
+    """重定向到文件/管道时强制 stdout/stderr 用 UTF-8。
+
+    中文 Windows 上重定向输出的默认编码是 GBK，CLI 打印 ✓/⚠/中文时会
+    UnicodeEncodeError 直接崩在收尾的 print 上（真机抓到：导入已成功落盘，
+    却在打印结果时 traceback）。控制台（tty）不动——Python 在 Windows
+    控制台上走宽字符 API，本身能正常显示中文/emoji。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            enc = getattr(stream, "encoding", "") or ""
+            if not stream.isatty() and enc.lower().replace("-", "") != "utf8":
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 
 def _activate_bundled_git() -> None:

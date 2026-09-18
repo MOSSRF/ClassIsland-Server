@@ -290,7 +290,9 @@ def build(platform: str, files: list[Path], outdir: Path) -> Path:
     if platform == "windows":
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
             for f in files:
-                z.write(f, f"{top}/" + f.relative_to(ROOT).as_posix())
+                # .bat/.cmd 必须 CRLF：归档时统一转换，不依赖工作区/ git 换行
+                z.writestr(f"{top}/" + f.relative_to(ROOT).as_posix(),
+                           BR.archive_bytes(f))
             z.writestr(f"{top}/runtime/PYTHON-RUNTIME.md", runtime_readme(cfg, sha))
             for p in sorted(rt.rglob("*")):
                 if not p.is_file():

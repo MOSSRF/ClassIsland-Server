@@ -136,6 +136,20 @@ def _safe_name(files: list[Path]) -> None:
                     f"拒绝打包；请先脱敏。")
 
 
+def archive_bytes(f: Path) -> bytes:
+    """读取待归档文件的字节；.bat/.cmd 强制 CRLF 换行。
+
+    不能依赖 git 检出时的 .gitattributes 转换——打包直接读的是工作区文件，
+    而工作区里可能是 LF（尤其在 Linux 上打包给 Windows 用）。中文 cmd 以
+    GBK 解析 UTF-8 的 LF bat 时，多字节字符会跨行错位拆散括号块，表现为
+    一堆「不是内部或外部命令」+乱码（1.3.1/1.4.0 真机各踩过一次）。
+    """
+    data = f.read_bytes()
+    if f.suffix.lower() in (".bat", ".cmd"):
+        data = data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+    return data
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="打包独立集控服务器发布物")
     ap.add_argument("--out", default=None, help="输出文件路径")
@@ -160,7 +174,7 @@ def main() -> int:
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
             for f in files:
                 arc = f"{top}/" + f.relative_to(ROOT).as_posix()
-                z.write(f, arc)
+                z.writestr(arc, archive_bytes(f))
     else:
         with tarfile.open(out, "w:gz") as t:
             for f in files:
