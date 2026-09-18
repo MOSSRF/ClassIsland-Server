@@ -48,6 +48,7 @@ import appconfig                                # noqa: E402
 import ci_schema as S                          # noqa: E402
 import repourl as RU                            # noqa: E402
 import yaml_edit as YE                         # noqa: E402
+import import_profile as IP                    # noqa: E402
 from build import BuildError, build as build_profile   # noqa: E402
 
 # 环境相关配置全部来自 appconfig（config.json / CISRV_* 环境变量）
@@ -118,23 +119,88 @@ def ensure_seed(fname: str) -> bool:
 
 def _git(args: list[str], cwd: Path | None = None,
          timeout: int = 180) -> subprocess.CompletedProcess:
-    return subprocess.run(args, cwd=cwd, env=appconfig.git_env(),
+    # 向导场景必须【非交互】：探测/clone 私有库时不能挂住等输入。
+    # 内置 MinGit 的系统配置带 credential.helper=manager（GCM 图形管理器），
+    # 不拦住的话会在桌面弹登录窗，子进程一直挂到 timeout——这正是
+    # 「向导连不上集控仓库」的典型表现。
+    #   · GIT_TERMINAL_PROMPT=0  禁止终端里问用户名/密码
+    #   · credential.helper=（空）覆盖系统配置，禁用 GCM/wincred
+    #   · GCM_INTERACTIVE=never   双保险：GCM 绝不弹 GUI
+    # 发布 push 用的是 do_publish 里独立的 run()，不受此影响，
+    # 用户自行配置的凭据（令牌 URL / SSH）照常工作。
+    env = appconfig.git_env()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GCM_INTERACTIVE"] = "never"
+    n = int(env.get("GIT_CONFIG_COUNT") or "0")
+    env[f"GIT_CONFIG_KEY_{n}"] = "credential.helper"
+    env[f"GIT_CONFIG_VALUE_{n}"] = ""
+    env["GIT_CONFIG_COUNT"] = str(n + 1)
+    return subprocess.run(args, cwd=cwd, env=env,
                           capture_output=True, text=True, timeout=timeout)
 
 
-def _remote_default_branch(url: str) -> str | None:
-    """探测远端默认分支（main/master/…）；探测不到返回 None。"""
+def _classify_git_error(err: str, url: str) -> str:
+    """把 git 的 stderr 翻成对新手可操作的中文提示。"""
+    e = (err or "").lower()
+    is_http = url.startswith("http")
+    if any(s in e for s in ("authentication failed", "could not read username",
+                           "could not read password", "terminal prompts disabled",
+                           "invalid username or password", "401", "403",
+                           "access denied", "permission denied")):
+        return ("远端需要登录（仓库是私有的，或地址里的令牌不对）。\n"
+                "集控配置仓库必须是【公开仓库】：客户端不带任何凭据去拉这些 JSON。\n"
+                "若确需私有库，请改用带访问令牌的 HTTPS 地址，例如：\n"
+                "  https://用户名:令牌@gitee.com/用户名/仓库名.git")
+    if any(s in e for s in ("not found", "404", "does not exist",
+                           "repository nonexistent",
+                           "does not appear to be a git repository",
+                           "could not read from remote repository")):
+        return ("远端仓库不存在或无法访问（地址写错 / 仓库是私有的 / 还没在网站上建库）。\n"
+                "Gitee/GitHub 对无权限的私有库也会返回 Not Found。请核对地址，"
+                "并确认仓库已设为公开。")
+    if any(s in e for s in ("could not resolve host", "failed to connect",
+                           "unable to access", "timed out", "timeout",
+                           "network is unreachable", "connection refused")):
+        return ("网络连不通代码托管站点（DNS 解析失败 / 连接超时 / 被防火墙拦截）。\n"
+                "请检查本机网络后重试。原始信息：\n" + (err or "").strip()[-400:])
+    tail = (err or "").strip()[-400:]
+    if is_http and ("token" in e or "private" in e):
+        tail = "仓库可能是私有的：集控要求公开仓库。\n" + tail
+    return "git 访问远端失败：\n" + tail if tail else "git 访问远端失败（无错误输出）"
+
+
+def _probe_remote(url: str) -> dict:
+    """探测远端。返回 {state, branch, detail}：
+
+      state="ok"    远端非空，branch 为默认分支；
+      state="empty" 远端可匿名访问但是空仓库（刚建的库零提交），branch 为 None；
+      state="error" 无法访问（认证/不存在/网络），detail 为可操作提示。
+
+    关键：rc!=0（失败）和 rc==0 但无输出（真空库）必须分开，
+    否则私有库/错地址会被误判成空仓库，本地 init 后假装"连接成功"，
+    直到发布 push 才炸 —— 这正是向导"连不上"却提示成功的来源。
+    """
     try:
         r = _git(["git", "ls-remote", "--symref", url, "HEAD"], timeout=60)
-    except Exception:
-        return None
+    except subprocess.TimeoutExpired:
+        return {"state": "error", "branch": None,
+                "detail": "探测远端超时（60 秒无响应），请检查网络。"}
+    except Exception as ex:
+        return {"state": "error", "branch": None,
+                "detail": f"探测远端时出错：{ex}"}
     if r.returncode != 0:
-        return None
-    # 输出形如：ref: refs/heads/master\tHEAD
+        return {"state": "error", "branch": None,
+                "detail": _classify_git_error(
+                    (r.stdout or "") + (r.stderr or ""), url)}
+    branch = None
     for line in (r.stdout or "").splitlines():
         if line.startswith("ref: refs/heads/"):
-            return line.split("refs/heads/", 1)[1].split("\t", 1)[0].strip()
-    return None
+            branch = line.split("refs/heads/", 1)[1].split("\t", 1)[0].strip()
+            break
+    if branch:
+        return {"state": "ok", "branch": branch, "detail": ""}
+    # rc==0 但没有 HEAD：远端可达，只是一个提交都没有的空仓库
+    return {"state": "empty", "branch": None, "detail": ""}
 
 
 def repo_status() -> dict:
@@ -175,13 +241,10 @@ def repo_setup(body: dict) -> dict:
     rid = RU.parse_repo(text)              # 无法识别会抛 ValueError
     url = RU.clone_url(rid)
 
-    branch = (_remote_default_branch(url)
-              or (body.get("branch") or "").strip()
-              or "master")
-
     live = LIVE_REPO
-    cloned = False
     note = ""
+    is_empty_remote = False
+
     if live.exists() and (live / ".git").exists():
         # 已绑定仓库：校验 origin 是否指向同一地址，避免静默写错地方
         r = _git(["git", "remote", "get-url", "origin"], cwd=live)
@@ -190,28 +253,50 @@ def repo_setup(body: dict) -> dict:
             raise ValueError(
                 f"{live} 已是另一个仓库（{cur}）的克隆，拒绝改绑。"
                 "如需更换，请先在 config.json 修改 live_repo。")
+        # 已绑定则沿用现有分支（可能用户手改过），不再强制探测
+        branch = appconfig.git_branch()
+        probe = {"state": "bound"}
     elif live.exists() and any(live.iterdir()):
         raise ValueError(f"目标目录 {live} 已存在且非空（也不是 git 仓库），"
                          "请换一个空目录或在 config.json 指定 live_repo。")
     else:
+        # 先探测：区分 非空仓库 / 真空库 / 连不上（认证、不存在、网络）
+        probe = _probe_remote(url)
+        if probe["state"] == "error":
+            # 绝不静默本地 init 后假装连上 —— 那样首次 push 才炸，
+            # 用户根本不知道问题出在仓库地址/权限/网络。
+            raise ValueError("无法连接集控仓库：\n" + probe["detail"])
+        branch = (probe["branch"]
+                  or (body.get("branch") or "").strip() or "master")
         live.parent.mkdir(parents=True, exist_ok=True)
-        r = _git(["git", "clone", "-q", "--branch", branch, url, str(live)])
-        note = ""
-        if r.returncode != 0:
-            # 某些空仓库克隆指定分支会失败，退回不带分支克隆
-            r2 = _git(["git", "clone", "-q", url, str(live)])
-            if r2.returncode != 0:
-                # 全新空仓库（Gitee/GitHub 刚建的库往往零提交）根本 clone 不下来。
-                # 本地 init 并绑定 origin，首次发布时 push 会建立远程分支。
-                live.mkdir(parents=True, exist_ok=True)
-                ri = _git(["git", "init", "-q", "-b", branch], cwd=live)
-                if ri.returncode != 0:                 # 旧版 git 没有 -b
-                    _git(["git", "init", "-q"], cwd=live)
-                    _git(["git", "symbolic-ref", "HEAD",
-                          f"refs/heads/{branch}"], cwd=live)
-                _git(["git", "remote", "add", "origin", url], cwd=live)
-                note = "远端是空仓库：已在本地初始化并绑定，首次发布时会创建远程分支。"
-        cloned = True
+        if probe["state"] == "empty":
+            # 真空库：clone 不下来，本地 init 绑 origin，首次发布时 push 建分支
+            is_empty_remote = True
+            live.mkdir(parents=True, exist_ok=True)
+            ri = _git(["git", "init", "-q", "-b", branch], cwd=live)
+            if ri.returncode != 0:                 # 旧版 git 没有 -b
+                _git(["git", "init", "-q"], cwd=live)
+                _git(["git", "symbolic-ref", "HEAD",
+                      f"refs/heads/{branch}"], cwd=live)
+            rr = _git(["git", "remote", "add", "origin", url], cwd=live)
+            if rr.returncode != 0:
+                raise ValueError("绑定 origin 失败："
+                                 + (rr.stderr or rr.stdout or "").strip())
+            note = ("远端是空仓库：已在本地初始化并绑定，发布地址已记下，"
+                    "点「发布到线上」时会创建远程分支。")
+        else:
+            # 非空仓库：正常 clone。先用探测到的默认分支，失败再退回不带分支
+            r = _git(["git", "clone", "-q", "--branch", branch,
+                      url, str(live)])
+            if r.returncode != 0:
+                r2 = _git(["git", "clone", "-q", url, str(live)])
+                if r2.returncode != 0:
+                    # 探测时明明能访问，clone 却失败：把真实报错交出来
+                    raise ValueError(
+                        "clone 失败：\n" + _classify_git_error(
+                            (r2.stdout or "") + (r2.stderr or ""), url))
+
+    cloned = (live / ".git").exists()
 
     # 持久化路径与分支
     appconfig.save_user_config(
@@ -443,13 +528,65 @@ def save_state(fname: str, body: dict) -> dict:
     build_profile(doc, warnings)          # 抛 BuildError 就让上层返回 400
 
     # 原子写 + 备份原文件（备份可在 config.json 里关闭）
+    out = _commit_yaml(p, new, text, sections)
+    out["warnings"] = warnings
+    return out
+
+
+def _commit_yaml(p: Path, new: str, old: str, sections: list[str]) -> dict:
+    """备份原文 + 原子替换，返回前端要的回执。集中一处避免多个写入口各自实现。"""
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    bak = backup_write(f"{ts}.{p.stem}.yaml", text.encode("utf-8"))
+    bak = backup_write(f"{ts}.{p.stem}.yaml", old.encode("utf-8"))
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(new, encoding="utf-8")
     os.replace(tmp, p)
-    return {"ok": True, "warnings": warnings, "backup": bak,
-            "sections": list(sections)}
+    return {"ok": True, "backup": bak, "sections": list(sections)}
+
+
+def import_default(fname: str, body: dict) -> dict:
+    """把客户端导出的 Default.json 合并进工作课表，指定归属班级 id。
+
+    只重写 timelayouts / subjects / classes 三段（其余注释字节不动），
+    合并后过 build.py 校验，不过绝不落盘。
+    """
+    cid = str(body.get("id") or "").strip()
+    if not cid:
+        raise ValueError("缺少班级 id")
+    profile = body.get("profile")
+    if not isinstance(profile, dict):
+        raise ValueError("缺少 profile（Default.json 内容）")
+    cname = (body.get("name") or None)
+
+    p = yaml_path(fname)
+    text = p.read_text(encoding="utf-8")
+    doc = yaml.safe_load(text) or {}
+
+    res = IP.merge_profile(doc, profile, cid, cname)
+
+    # 落盘前正向构建一次：导入结果必须能被 split/publish 接受
+    warnings: list[str] = []
+    build_profile(res["doc"], warnings)
+
+    new = text
+    new = YE.upsert_section(
+        new, "timelayouts",
+        YE.dump_timelayouts(res["doc"].get("timelayouts") or {}))
+    new = YE.upsert_section(
+        new, "subjects",
+        YE.dump_subjects(res["doc"].get("subjects") or {}))
+    new = YE.upsert_section(
+        new, "classes",
+        YE.dump_classes(res["doc"].get("classes") or []))
+
+    # upsert 后再 parse+build 一次，确保重生成的文本本身无歧义
+    build_profile(yaml.safe_load(new), [])
+
+    out = _commit_yaml(p, new, text, ["timelayouts", "subjects", "classes"])
+    out["warnings"] = res["warnings"] + warnings
+    out["replaced"] = res["replaced"]
+    out["classId"] = cid
+    out["className"] = res["class"]["name"]
+    return out
 
 
 # ── 构建 / 预检 / 发布 ──────────────────────────────────────────
@@ -458,6 +595,10 @@ def run(cmd: list[str], cwd: Path, env: dict | None = None) -> dict:
     e = appconfig.git_env()
     if env:
         e.update(env)
+    # WebUI 是后台进程，没人能回答终端里的用户名/密码提问；
+    # 让缺凭据的 push 立即失败并返回信息，而不是干等 300 秒超时。
+    # 不清 credential.helper：Windows 凭据管理器 / GCM 里缓存的令牌照常可用。
+    e.setdefault("GIT_TERMINAL_PROMPT", "0")
     r = subprocess.run(cmd, cwd=cwd, env=e, capture_output=True,
                        text=True, timeout=300)
     return {"cmd": " ".join(cmd), "rc": r.returncode,
@@ -663,6 +804,11 @@ class H(BaseHTTPRequestHandler):
                         return self._json(repo_apply_base(body))
                     except ValueError as e:
                         return self._json({"error": str(e)}, 400)
+                if path == "/api/import-default":
+                    try:
+                        return self._json(import_default(FILE, body))
+                    except ValueError as e:
+                        return self._json({"error": str(e)}, 400)
                 if path == "/api/build":
                     return self._json(do_build(FILE))
                 if path == "/api/preflight":
@@ -687,6 +833,10 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=8848)
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--file", default="schedule.yaml")
+    ap.add_argument("--pidfile", default="",
+                    help="写后台进程 PID 的文件（Windows 便携模式用）")
+    ap.add_argument("--open-browser", action="store_true",
+                    help="服务起来后自动打开默认浏览器")
     a = ap.parse_args()
     FILE = a.file
 
@@ -705,7 +855,40 @@ def main() -> int:
     srv = ThreadingHTTPServer((a.host, a.port), H)
     # 监听全网卡时提示用 localhost，避免把 0.0.0.0 原样抄进浏览器
     shown = "localhost" if a.host in ("0.0.0.0", "", "::") else a.host
-    print(f"✓ 课表编辑界面: http://{shown}:{a.port}   (编辑 {FILE})")
+    url = f"http://{shown}:{a.port}"
+    print(f"✓ 课表编辑界面: {url}   (编辑 {FILE})")
+
+    # 后台模式：写 pidfile，退出时清掉（崩溃残留由启动器负责甄别）
+    pidfile = Path(a.pidfile) if a.pidfile else None
+    if pidfile:
+        pidfile.parent.mkdir(parents=True, exist_ok=True)
+        pidfile.write_text(str(os.getpid()), encoding="ascii")
+
+        import atexit
+        import signal
+
+        def _cleanup(*_a):
+            try:
+                pidfile.unlink()
+            except OSError:
+                pass
+
+        atexit.register(_cleanup)
+        # Windows taskkill /F（=TerminateProcess）不会跑任何清理，
+        # 那种情况由 stop-webui.bat 自己删 pidfile；POSIX 的 SIGTERM
+        # 和 Ctrl-C(SIGINT) 走到这里，正常退出即可触发 atexit。
+        for _sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                signal.signal(_sig, lambda *a: (_cleanup(), sys.exit(0)))
+            except (ValueError, OSError):
+                pass
+
+    if a.open_browser:
+        # 延迟一点点开浏览器，确保 HTTP 已在 accept
+        def _open():
+            import webbrowser
+            webbrowser.open(url)
+        threading.Timer(0.6, _open).start()
     if seeded:
         print("  · 未发现 schedule.yaml，已用 examples/schedule.example.yaml "
               "生成一份示例作为起点。")
@@ -717,6 +900,12 @@ def main() -> int:
         srv.serve_forever()
     except KeyboardInterrupt:
         print("\n已停止")
+    finally:
+        if pidfile:
+            try:
+                pidfile.unlink()
+            except OSError:
+                pass
     return 0
 
 

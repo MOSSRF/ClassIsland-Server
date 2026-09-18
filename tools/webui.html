@@ -162,6 +162,7 @@ button.guide{border-color:var(--accent);color:var(--accent)}
   <span class="spacer"></span>
   <span id="dirty" class="dirty"></span>
   <button id="bGuide" class="guide">首次使用向导</button>
+  <button id="bImport">导入 Default.json</button>
   <button id="bSave" class="primary">保存</button>
   <button id="bBuild">构建校验</button>
   <button id="bPre">预检</button>
@@ -349,6 +350,45 @@ button.guide{border-color:var(--accent);color:var(--accent)}
       <button id="gCancel">关闭</button>
       <button id="gConnect" class="primary">连接仓库</button>
       <button id="gApply" hidden class="primary">确认并写入发布地址</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 导入客户端 Default.json ══════════════════════════════ -->
+<div class="modal" id="imp">
+  <div class="box">
+    <h3>导入客户端导出的 Default.json</h3>
+    <div class="body">
+      <ol class="steps">
+        <li>在 ClassIsland 客户端里导出课表档案 <code>Default.json</code>。</li>
+        <li>选择该文件，并填写它归属的<b>班级 id</b>（就是大屏集控里填的班级标识 / 线上目录名）。</li>
+        <li>导入后作息、科目的 GUID 会<b>原样保留</b>，可在网页继续编辑，再点「发布到线上」拆分推送。</li>
+      </ol>
+      <div class="warnbox">
+        相同 id 的班级会被这份档案<b>整份覆盖</b>（导入前会自动备份当前课表）。<br>
+        叠加课表 / 临时课表不属于常规周课表，会被跳过并在结果里提示。
+      </div>
+      <div class="gfield">
+        <label>Default.json 文件</label>
+        <input type="file" id="impFile" accept=".json,application/json">
+      </div>
+      <div class="gfield">
+        <label>归属班级 id（必填，投入使用后不可改）</label>
+        <input type="text" id="impId" placeholder="例如 202506">
+      </div>
+      <div class="gfield">
+        <label>班级显示名（可选，留空则自动识别）</label>
+        <input type="text" id="impName" placeholder="例如 2025级6班">
+      </div>
+      <div class="gfield">
+        <label>导入结果</label>
+        <div id="impResult" class="gstatus" hidden></div>
+      </div>
+    </div>
+    <div class="foot">
+      <span class="spacer" style="flex:1"></span>
+      <button id="impCancel">关闭</button>
+      <button id="impGo" class="primary">导入</button>
     </div>
   </div>
 </div>
@@ -1358,6 +1398,48 @@ $('#gApply').onclick=async()=>{
     await reload();
   }catch(e){ toast('写入失败：'+e.message,'bad'); }
   finally{ $('#gApply').disabled=false; }
+};
+
+// ── 导入客户端 Default.json ─────────────────────────────────
+const imp=$('#imp');
+function openImport(){ imp.classList.add('show'); $('#impResult').hidden=true; }
+function closeImport(){ imp.classList.remove('show'); }
+$('#bImport').onclick=openImport;
+$('#impCancel').onclick=closeImport;
+imp.addEventListener('click',e=>{ if(e.target===imp) closeImport(); });
+let impProfile=null;
+$('#impFile').onchange=()=>{
+  impProfile=null;
+  const f=$('#impFile').files[0];
+  if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{ impProfile=JSON.parse(rd.result); toast('已读取 '+f.name,'ok'); }
+    catch(e){ impProfile=null; toast('文件不是合法 JSON：'+e.message,'bad'); }
+  };
+  rd.readAsText(f,'utf-8');
+};
+$('#impGo').onclick=async()=>{
+  const id=$('#impId').value.trim();
+  const name=$('#impName').value.trim();
+  const res=$('#impResult');
+  if(!impProfile){ toast('请先选择 Default.json 文件','bad'); return; }
+  if(!id){ toast('请填写归属班级 id','bad'); return; }
+  const verb=(ST.classes||[]).some(c=>String(c.id)===id)?'覆盖':'新增';
+  if(!confirm('将以这份档案'+verb+'班级 '+id+'（导入前会自动备份）。继续？')) return;
+  $('#impGo').disabled=true; res.hidden=false; res.className='gstatus'; res.textContent='导入中…';
+  try{
+    const r=await api('/api/import-default',{id,name:name||null,profile:impProfile});
+    const warns=r.warnings||[];
+    res.className='gstatus ok';
+    res.textContent='✓ 已'+(r.replaced?'覆盖':'新增')+'班级 '+r.classId+'（'+r.className+'）。'
+      +(warns.length?'\n\n'+warns.length+' 条提示：\n· '+warns.slice(0,12).join('\n· ')
+        +(warns.length>12?'\n…共 '+warns.length+' 条':''):'');
+    toast('导入成功，正在重新载入','ok');
+    await reload();
+  }catch(e){
+    res.className='gstatus bad'; res.textContent='✗ '+e.message;
+  }finally{ $('#impGo').disabled=false; }
 };
 
 async function reload(){

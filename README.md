@@ -37,6 +37,7 @@ ClassIsland 集控支持无服务端模式（`ServerKind: 0`）：将若干 JSON
 - **版本号自动管理**：基于内容哈希自动递增 `Version`，避免内容更新后客户端不生效。
 - **发布前安全校验**：检查悬空引用、文件覆盖影响与 `Version` 单调性，校验不通过将终止发布。
 - **既有配置迁移**：可将线上已有的人工维护配置反向导入为 YAML，使生成结果为既有配置的超集，而非直接覆盖。
+- **客户端档案导入**：在 Web 界面直接上传 ClassIsland 客户端导出的 `Default.json`，指定班级 id 后自动拆分为作息/科目/课表并写入 YAML，GUID 原样保留，校验通过即可发布；也可用 `tools/import_default.py` 命令行操作。
 - **YAML 最小改动写入**：保存时仅重写实际变更的 YAML 段，其余内容保持字节不变；`guid:` 钉桩、警示注释及条目上方的手写说明均原样保留。
 - **确定性输出**：相同输入始终生成相同字节内容，便于通过 git diff 审查变更。
 - **预留班级**：可预先占用班级 id 而暂不排课，且不会生成空课表导致客户端显示空白。
@@ -53,7 +54,7 @@ ClassIsland 集控支持无服务端模式（`ServerKind: 0`）：将若干 JSON
 
 便携包已内置 Python 运行时（`runtime/`）与纯 Python 版 PyYAML（`vendor/`）。下载并解压对应发布包后：
 
-- **Windows**：双击运行 `start-webui.bat`
+- **Windows**：双击运行 `start-webui.bat`（后台启动、无控制台窗口、自动打开默认浏览器；停止服务运行 `stop-webui.bat`，日志在 `logs\webui.log`；需要前台看日志可用 `start-webui.bat debug`）
 - **Linux / macOS**：执行 `./start-webui.sh`
 
 启动脚本会优先使用包内 `runtime/` 的解释器；纯源码包则回退到系统 Python 3.9+。两种包都**无需联网、无需 `pip install`**（仅当你自行裁剪了 `vendor/` 又没用便携运行时时，才需 `pip install -r requirements.txt`）。默认端口为 `8848`，也可通过参数指定，例如 `./start-webui.sh 8000`。
@@ -183,6 +184,7 @@ policy.json            集控策略（全校统一）
 
 ```
 start-webui.sh / .bat  启动脚本（优先用内置运行时，免安装）
+stop-webui.bat         停止 Windows 后台服务（start-webui.bat 默认后台无窗口）
 requirements.txt       第三方依赖清单（仅开发/自行裁剪 vendor 时需要）
 vendor/                 内置的纯 Python PyYAML（跨平台，免安装）
 src/
@@ -193,12 +195,15 @@ src/
   build.py        YAML → 完整 Default.json（全部校验逻辑集中于此）
   split.py        YAML → 集控静态文件树及 Version 管理
   yaml_edit.py    按段改写 YAML（保留注释与紧凑写法）
+  import_profile.py       客户端导出档案（Default.json）→ YAML 合并逻辑
 tools/
   webui.py        Web 服务端（含首次使用向导接口）
+  webui_bg.py     Windows 后台无窗口启动器（pythonw + 日志轮转 + pid）
   webui.html      Web 前端（单文件，无构建步骤）
   preflight.py    发布前安全检查
   prune_ids.py    清理已删除班级在线上仓库中的残留目录
   import_live.py  将线上既有配置反向导入为 YAML
+  import_default.py       命令行导入客户端导出的 Default.json
   build_release.py         构建纯源码发布压缩包
   build_portable.py        构建内置 Python 的便携包（Windows/Linux）
   build_windows_bundle.py  构建可直接接入集控的 Windows 客户端整合包

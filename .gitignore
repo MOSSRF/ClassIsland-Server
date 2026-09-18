@@ -12,6 +12,7 @@ dist_live/
 live-repo/
 backups/
 versions.json
+logs/
 
 # Python
 __pycache__/

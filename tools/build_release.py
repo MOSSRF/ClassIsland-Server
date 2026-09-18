@@ -40,6 +40,7 @@ INCLUDE_FILES = [
     ("config.example.json", True),
     ("start-webui.sh", False),
     ("start-webui.bat", False),
+    ("stop-webui.bat", False),
 ]
 INCLUDE_DIRS = ["src", "tools", "vendor", "docs", "examples", "reference"]
 
