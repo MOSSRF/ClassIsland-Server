@@ -480,14 +480,39 @@ function slotsOf(name){
   const slots=[],marks=[];
   (L.items||[]).forEach(it=>{
     if(it.type==='class') slots.push({start:it.start,end:it.end});
-    else if(it.type==='divider') marks.push({after:slots.length,kind:'divider'});
-    else if(it.type==='break'&&it.name) marks.push({after:slots.length,kind:'break',name:it.name});
+    else if(it.type==='divider') marks.push({after:slots.length,time:it.start,kind:'divider'});
+    else if(it.type==='break'&&it.name) marks.push({after:slots.length,time:it.start,kind:'break',name:it.name});
   });
   return {slots,marks};
 }
 function recalcLayouts(){
   ST.timelayouts={};
   Object.keys(ST.rawLayouts).forEach(n=>ST.timelayouts[n]=slotsOf(n));
+}
+
+// 钟点（HH:MM）→ 分钟，用于跨作息按真实时间对齐
+function hm(s){ const m=/^\s*(\d{1,2}):(\d{2})/.exec(s||''); return m?(+m[1]*60+ +m[2]):null; }
+
+/* 统一时间轴：把当周所有天（含主作息）用到的【上课钟点】去重合并后按时间排序。
+   关键：课表必须按真实钟点对齐，而不是按“第 N 节”序号堆叠——
+   周日晚自习作息的第 1 节课在 16:45，绝不能画到主作息 07:10 早读那一行。
+   返回每行 {start,end,mainIndex}；mainIndex 是该钟点在主作息里的节次（无则 -1）。 */
+function buildAxis(mainSlots, allSlots){
+  const byStart=new Map();
+  [...mainSlots, ...allSlots].forEach(s=>{
+    const t=hm(s.start); if(t==null) return;
+    const e=byStart.get(t);
+    if(!e) byStart.set(t,{start:s.start,end:s.end,min:t});
+    else {
+      // 同一开始时间但结束时间不同（罕见）：保留较晚的结束，避免重复行
+      if(hm(s.end)>hm(e.end)) e.end=s.end;
+    }
+  });
+  const rows=[...byStart.values()].sort((a,b)=>a.min-b.min);
+  const mainIdx=new Map();
+  mainSlots.forEach((s,i)=>{ const t=hm(s.start); if(t!=null&&!mainIdx.has(t)) mainIdx.set(t,i); });
+  rows.forEach(r=>{ r.mainIndex=mainIdx.has(r.min)?mainIdx.get(r.min):-1; });
+  return rows;
 }
 
 /* ══ 课表页 ══════════════════════════════════════════════ */
@@ -694,8 +719,35 @@ function renderGrid(cls){
   }
 
   const mainTl=ST.timelayouts[cls.timelayout]||{slots:[],marks:[]};
-  const maxRows=Math.max(mainTl.slots.length,
-    ...cols.map(c=>(ST.timelayouts[getDay(cls,c.key).tl]||{slots:[]}).slots.length));
+
+  // 每天解析一次作息，并把该天【每节课的开始钟点 → 当天列表下标】建好，
+  // 后面按统一钟点轴取/写值。不能再用统一的行号当各列下标——不同作息的
+  // 第 N 节课钟点不同（周日第1节在 16:45，主作息第1节在 07:10）。
+  const cg=cols.map(c=>{
+    const g=getDay(cls,c.key);
+    const tl=ST.timelayouts[g.tl]||{slots:[],marks:[]};
+    const idxByTime=new Map();
+    tl.slots.forEach((s,i)=>{ const t=hm(s.start); if(t!=null&&!idxByTime.has(t)) idxByTime.set(t,i); });
+    return {c,g,tl,idxByTime};
+  });
+  // 统一时间轴：主作息 + 当周所有天作息的上课钟点，按时间排序
+  const axis=buildAxis(mainTl.slots, cg.flatMap(x=>x.tl.slots));
+  // 标记（分割线/命名课间）锚到【它后面那节课的开始钟点】。
+  // 不能用标记自身时间：分割线 12:20 / 大课间 08:40 都不是上课起点，
+  // 统一轴里没有那一行；m.after = 标记之前已有几节课，slots[after] 即后一节课。
+  const markBefore=new Map();   // 钟点 -> [{kind,names:Set}]
+  const markTrailing=[];        // 落在最后一节课之后的标记
+  function addMark(anchor, m, srcName){
+    if(anchor==null){ markTrailing.push(m); return; }
+    const t=hm(anchor); if(t==null) return;
+    const key=t+'|'+m.kind; let e=markBefore.get(key);
+    if(!e){ e={time:t,kind:m.kind,names:new Set()}; markBefore.set(key,e); }
+    if(m.name) e.names.add(m.name);
+  }
+  (mainTl.marks||[]).forEach(m=>{ const nx=mainTl.slots[m.after]; addMark(nx?nx.start:null,m); });
+  cg.forEach(({tl})=>{
+    (tl.marks||[]).forEach(m=>{ const nx=tl.slots[m.after]; addMark(nx?nx.start:null,m); });
+  });
 
   const thead=el('tr');
   thead.appendChild(el('th',{className:'slot',textContent:'节次 / 时间'}));
@@ -746,48 +798,70 @@ function renderGrid(cls){
   });
   tb.appendChild(thead);
 
-  for(let r=0;r<maxRows;r++){
-    mainTl.marks.filter(m=>m.after===r).forEach(m=>{
+  axis.forEach(row=>{
+    const t=hm(row.start);
+    // 锚到本节课钟点上的分割线/命名课间（可能来自不同作息，名字去重）
+    const ms=[];
+    ['divider','break'].forEach(k=>{ const e=markBefore.get(t+'|'+k); if(e) ms.push(e); });
+    ms.forEach(m=>{
       const tr=el('tr');
-      tr.innerHTML=`<td class="mark" colspan="${cols.length+1}">${
-        m.kind==='divider'?'──── 分割线 ────':'· '+m.name}</td>`;
+      const label=m.kind==='divider'
+        ? '──── 分割线 ────'
+        : '· '+[...m.names].join(' / ');
+      tr.innerHTML=`<td class="mark" colspan="${cols.length+1}">${label}</td>`;
       tb.appendChild(tr);
     });
 
     const tr=el('tr');
-    const s=mainTl.slots[r];
-    tr.innerHTML=`<th class="slot">${r+1}　${s?s.start+'-'+s.end:''}</th>`;
-    cols.forEach(c=>{
-      const g0=getDay(cls,c.key);
+    // 行号只对主作息连续编号；非主作息独有的钟点（如周日晚自习）不强行套节次
+    const idxLabel=row.mainIndex>=0?(row.mainIndex+1):'·';
+    tr.innerHTML=`<th class="slot">${idxLabel}　${row.start}-${row.end}</th>`;
+    cg.forEach(({c,g,idxByTime})=>{
       const td=el('td');
-      if(r>=(ST.timelayouts[g0.tl]||{slots:[]}).slots.length){
-        td.className='nodata'; tr.appendChild(td); return;
-      }
-      const v=g0.list[r]||'';
+      const di=idxByTime.get(t);
+      if(di==null){ td.className='nodata'; tr.appendChild(td); return; }  // 该天作息无此钟点
+      const v=g.list[di]||'';
       if(!v) td.className='empty';
       const sl=el('select');
       sl.innerHTML='<option value="">—</option>'+
         ST.subjects.map(n=>`<option${n===v?' selected':''}>${n}</option>`).join('');
       sl.onchange=()=>{
-        let key=c.key, g=g0, mode=c.mode;
+        let key=c.key, gg=g, mode=c.mode;
         if(mode==='inherited'){
           // 在第 N 周改了「每周相同」的一天 → 先整套拆成 @1..@N 再改。
           // 绝不能直接写普通键：那会把其它周也改掉，还会与分周版本叠加。
           splitDay(cls,c.day);
           key=dayKey(c.day,curWeek);
-          g=getDay(cls,key);
+          gg=getDay(cls,key);
           toast('已把「'+ST.dayLabel[c.day]+'」拆分为按周轮换，当前编辑第 '+curWeek+' 周','ok');
         }
-        g.list[r]=sl.value;
-        setDay(cls,key,g.list,g.tl,g.dict);
-        td.className=sl.value?'':'empty';
-        mark('classes');
-        if(mode==='inherited') render();
+        // 写回该列自己作息里的下标，而不是统一行号
+        const tl2=ST.timelayouts[gg.tl]||{slots:[]};
+        let di2=null;
+        tl2.slots.forEach((s2,i2)=>{ if(hm(s2.start)===t&&di2==null) di2=i2; });
+        if(di2!=null){
+          while(gg.list.length<=di2) gg.list.push('');
+          gg.list[di2]=sl.value;
+          setDay(cls,key,gg.list,gg.tl,gg.dict);
+          td.className=sl.value?'':'empty';
+          mark('classes');
+          if(mode==='inherited') render();
+        }
       };
       td.appendChild(sl); tr.appendChild(td);
     });
     tb.appendChild(tr);
-  }
+  });
+
+  // 锚点落在最后一节课之后的标记（罕见，如周日 21:20 的行动点），
+  // 追加到末尾，保证作息里的分割线/命名课间一个都不丢
+  markTrailing.forEach(m=>{
+    if(!m.name && m.kind!=='divider') return;
+    const tr=el('tr');
+    const label=m.kind==='divider'?'──── 分割线 ────':'· '+m.name;
+    tr.innerHTML=`<td class="mark" colspan="${cols.length+1}">${label}</td>`;
+    tb.appendChild(tr);
+  });
 }
 
 // 删除某一天的某周版本；有普通键（每周相同）则恢复跟随，
